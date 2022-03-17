@@ -457,7 +457,7 @@ class TrojanTesterNER(TrojanTester):
         print('tot len:', ndata)
         ntr = min(int(ndata * 0.8), max(self.batch_size * 3, 24))
         nte = min(ndata - ntr, max(self.batch_size * 6, 64))
-        tokenized_dataset = tokenize_for_ner(self.tokenizer, raw_dataset, trigger_info=self.trigger_info, data_limit=ntr+ntr+nte)
+        tokenized_dataset = tokenize_for_ner(self.tokenizer, raw_dataset, trigger_info=self.trigger_info)
         # tokenized_dataset = tokenize_for_ner(self.tokenizer, raw_dataset, trigger_info=None)
         tokenized_dataset.set_format('pt',
                                      columns=['input_ids', 'attention_mask', 'labels', 'label_masks', 'insert_idx'])
