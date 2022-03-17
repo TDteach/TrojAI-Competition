@@ -333,7 +333,7 @@ def tokenize_and_align_labels(tokenizer, original_words, original_labels, max_in
     return tokenized_inputs['input_ids'], tokenized_inputs['attention_mask'], list_labels, list_label_masks, None
 
 
-def tokenize_for_ner(tokenizer, dataset, trigger_info=None):
+def tokenize_for_ner(tokenizer, dataset, trigger_info=None, data_limit=None):
     column_names = dataset.column_names
     tokens_column_name = "tokens"
     tags_column_name = "ner_tags"
@@ -377,7 +377,12 @@ def tokenize_for_ner(tokenizer, dataset, trigger_info=None):
             new_toks, new_tags, new_labs = list(), list(), list()
             insert_idxs = list()
             list_src_pos = list()
-            for tok, tag, lab in zip(tokens, tags, labels):
+            if data_limit:
+                bar = list(np.random.permutation(len(labels)))
+            else:
+                bar = list(range(len(labels)))
+            for z in bar:
+                tok, tag, lab = tokens[z], tags[z], labels[z]
                 new_data, idx, src_pos = add_trigger_template_into_data([tok, tag, lab], trigger_info)
                 if new_data is None: continue
                 new_tok, new_tag, new_lab = new_data
@@ -386,6 +391,8 @@ def tokenize_for_ner(tokenizer, dataset, trigger_info=None):
                 new_labs.append(new_lab)
                 insert_idxs.append(idx)
                 list_src_pos.append(src_pos)
+                if data_limit and len(new_lab) >= data_limit:
+                    break
             tokens, tags, labels = new_toks, new_tags, new_labs
 
         input_ids, attention_mask, labels, label_masks, insert_idxs = tokenize_and_align_labels(
@@ -446,8 +453,11 @@ class TrojanTesterNER(TrojanTester):
         raw_dataset = datasets.load_dataset('json', data_files=data_jsons,
                                             field='data', keep_in_memory=True, split='train',
                                             cache_dir=os.path.join(self.scratch_dirpath, '.cache'))
-        print('tot len:', len(raw_dataset))
-        tokenized_dataset = tokenize_for_ner(self.tokenizer, raw_dataset, trigger_info=self.trigger_info)
+        ndata = len(raw_dataset)
+        print('tot len:', ndata)
+        ntr = min(int(ndata * 0.8), max(self.batch_size * 3, 24))
+        nte = min(ndata - ntr, max(self.batch_size * 6, 64))
+        tokenized_dataset = tokenize_for_ner(self.tokenizer, raw_dataset, trigger_info=self.trigger_info, data_limit=ntr+ntr+nte)
         # tokenized_dataset = tokenize_for_ner(self.tokenizer, raw_dataset, trigger_info=None)
         tokenized_dataset.set_format('pt',
                                      columns=['input_ids', 'attention_mask', 'labels', 'label_masks', 'insert_idx'])
@@ -456,8 +466,6 @@ class TrojanTesterNER(TrojanTester):
 
         ndata = len(tokenized_dataset)
         print('rst len:', ndata)
-        ntr = min(int(ndata * 0.8), max(self.batch_size * 3, 24))
-        nte = min(ndata - ntr, max(self.batch_size * 6, 64))
         nre = ndata - ntr - nte
         tr_dataset, te_dataset, _ = torch.utils.data.random_split(tokenized_dataset, [ntr, nte, nre])
         print('n_ntr:', len(tr_dataset))

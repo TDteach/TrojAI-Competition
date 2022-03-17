@@ -315,7 +315,7 @@ def get_weight_cut(model, delta_mask):
     return weight_cut
 
 
-def tokenize_for_qa(tokenizer, dataset, trigger_info=None):
+def tokenize_for_qa(tokenizer, dataset, trigger_info=None, data_limit=None):
     column_names = dataset.column_names
     question_column_name = "question"
     context_column_name = "context"
@@ -344,7 +344,12 @@ def tokenize_for_qa(tokenizer, dataset, trigger_info=None):
         if trigger_info is not None:
             new_que, new_cxt, new_ans = list(), list(), list()
             insert_idxs = list()
-            for que, cxt, ans in zip(q_text, c_text, a_text):
+            if data_limit:
+                bar = list(np.random.permutation(len(a_text)))
+            else:
+                bar = list(range(len(a_text)))
+            for z in bar:
+                que, cxt, ans = q_text[z], c_text[z], a_text[z]
                 new_data, idx_pair = add_trigger_template_into_data([que, cxt, ans], trigger_info)
                 if new_data is None: continue
                 new_q, new_c, new_a = new_data
@@ -352,6 +357,8 @@ def tokenize_for_qa(tokenizer, dataset, trigger_info=None):
                 new_cxt.append(new_c)
                 new_ans.append(new_a)
                 insert_idxs.append(idx_pair)
+                if data_limit and len(new_ans) >= data_limit:
+                    break
             q_text, c_text, a_text = new_que, new_cxt, new_ans
 
         pad_to_max_length = True
@@ -545,8 +552,11 @@ class TrojanTesterQA(TrojanTester):
         raw_dataset = datasets.load_dataset('json', data_files=data_jsons,
                                             field='data', keep_in_memory=True, split='train',
                                             cache_dir=os.path.join(self.scratch_dirpath, '.cache'))
-        print('tot len:', len(raw_dataset))
-        tokenized_dataset = tokenize_for_qa(self.tokenizer, raw_dataset, trigger_info=self.trigger_info)
+        ndata = len(raw_dataset)
+        print('tot len:', ndata)
+        ntr = min(int(ndata * 0.8), max(self.batch_size * 3, 24))
+        nte = min(ndata - ntr, max(self.batch_size * 6, 64))
+        tokenized_dataset = tokenize_for_qa(self.tokenizer, raw_dataset, trigger_info=self.trigger_info, data_limit=ntr+ntr+nte)
         # tokenized_dataset = tokenize_for_qa(self.tokenizer, raw_dataset, trigger_info=None)
         tokenized_dataset.set_format('pt', columns=['input_ids', 'attention_mask', 'token_type_ids', 'start_positions',
                                                     'end_positions', 'insert_idx'])
@@ -555,8 +565,6 @@ class TrojanTesterQA(TrojanTester):
 
         ndata = len(tokenized_dataset)
         print('rst len:', ndata)
-        ntr = min(int(ndata * 0.8), max(self.batch_size * 3, 24))
-        nte = min(ndata - ntr, max(self.batch_size * 6, 64))
         nre = ndata - ntr - nte
         tr_dataset, te_dataset, _ = torch.utils.data.random_split(tokenized_dataset, [ntr, nte, nre])
         print('n_ntr:', len(tr_dataset))
