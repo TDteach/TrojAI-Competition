@@ -1,0 +1,1 @@
+sudo singularity build example_trojan_detector.simg example_trojan_detector.def
