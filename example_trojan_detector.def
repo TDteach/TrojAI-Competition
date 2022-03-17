@@ -1,0 +1,34 @@
+Bootstrap: docker
+From: pytorch/pytorch:1.8.0-cuda11.1-cudnn8-runtime
+
+%files
+    ./example_trojan_detector.py /
+    ./trojan_detector_qa.py /
+    ./trojan_detector_ner.py /
+    ./trojan_detector_sc.py /
+    ./reverse_trigger.py /
+    ./train_clf.py /
+    ./utils_qa.py /
+    ./rainbow.py /
+    ./game_env.py /
+    ./squad_v2_data.json /
+    ./conll2003_data.json /
+    ./imdb_data.json /
+    ./metaparameters.json /
+    ./metaparameters_schema.json /
+    ./learned_parameters /
+    ./adj_param.pkl /
+    ./dqn_record.pkl /
+    ./lgbm.joblib /
+
+%post
+    pip install jsonargparse
+    pip install jsonpickle
+    pip install jsonschema
+    pip install transformers==4.10.3
+    pip install datasets==1.11.0
+    pip install lightgbm
+    pip install joblib
+
+%runscript
+    exec python3 /example_trojan_detector.py "$@"
