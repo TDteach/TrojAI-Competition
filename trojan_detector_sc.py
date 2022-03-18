@@ -454,7 +454,7 @@ class TrojanTesterSC(TrojanTester):
 
     def build_dataset(self, data_jsons):
         raw_dataset = datasets.load_dataset('json', data_files=data_jsons,
-                                            field='data', keep_in_memory=True, split='train',
+                                            field='data', keep_in_memory=False, split='train',
                                             cache_dir=os.path.join(self.scratch_dirpath, '.cache'))
         # raw_dataset, _ = torch.utils.data.random_split(raw_dataset, [200, len(raw_dataset)-200])
         ndata = len(raw_dataset)
@@ -715,7 +715,7 @@ def trojan_detector_sc(pytorch_model, tokenizer, data_jsons, scratch_dirpath):
                 savepath, action_dim = None, 2
             else:
                 savepath, action_dim = os.path.join(simg_data_fo, 'dqn_record.pkl'), 12
-            inc = DQNActor(trigger_info.desp_str, pytorch_model, tokenizer, data_jsons, TrojanTesterSC, max_epochs=300,
+            inc = DQNActor(trigger_info.desp_str, pytorch_model, tokenizer, data_jsons, TrojanTesterSC, max_epochs=300, scratch_dirpath=scratch_dirpath,
                            savepath=savepath, action_dim=action_dim)
             inc_list.append(inc)
         return inc_list

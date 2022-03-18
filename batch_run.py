@@ -41,7 +41,7 @@ row_filter = {
     # 'model_architecture':['deepset/roberta-base-squad2'],
     # 'model_architecture': ['roberta-base'],
     'model_architecture': None,
-    # 'source_dataset': ['qa:squad_v2'],
+    'source_dataset': ['ner:conll2003'],
     # 'source_dataset': None,
     'task_type': None
 }
@@ -189,8 +189,8 @@ if __name__ == '__main__':
         # if k<40: continue
 
         # if name_num >= 10: continue
-        if not md_name == 'id-00000099':
-            continue
+        # if not md_name == 'id-00000099':
+        #    continue
 
         model_filepath = os.path.join(folder_path, 'model.pt')
         examples_filepath = os.path.join(folder_path, 'example_data/clean-example-data.json')

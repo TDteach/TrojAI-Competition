@@ -749,10 +749,12 @@ class DQNActor:
                  tokenizer,
                  data_jsons,
                  inc_class,
+                 scratch_dirpath,
                  action_dim=12,
                  max_epochs=200,
                  savepath=None,
                  ):
+        self.scratch_dirpath = scratch_dirpath
         self.desp_str = desp_str
         self.obs_dim = 12
         self.action_dim = action_dim
@@ -807,7 +809,7 @@ class DQNActor:
         return selected_action
 
     def prepare_run(self, desp_str, pytorch_model, tokenizer, data_jsons, inc_class, max_epochs=200, action_dim=12):
-        self.env = XXEnv()
+        self.env = XXEnv(scratch_dirpath=self.scratch_dirpath)
         self.state = self.env.reset_with_desp(desp_str, pytorch_model, tokenizer, data_jsons, inc_class, max_epochs=max_epochs, action_dim=action_dim)
         self.done = False
 

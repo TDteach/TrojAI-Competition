@@ -11,10 +11,11 @@ datasets.utils.tqdm_utils._active = False
 
 
 class XXEnv:
-    def __init__(self):
+    def __init__(self, scratch_dirpath):
         self.obs_dim = 12
         self.action_dim = 12
         self.random_inc = random.Random()
+        self.scratch_dirpath = scratch_dirpath
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.target_lenn = None
@@ -114,8 +115,7 @@ class XXEnv:
         self.arm_dict = dict()
         for lenn in range(action_dim):
             trigger_info = TriggerInfo(desp_str, lenn + 1)
-            act_inc = inc_class(pytorch_model, tokenizer, data_jsons, trigger_info, './scratch',
-                                max_epochs=max_epochs)
+            act_inc = inc_class(pytorch_model, tokenizer, data_jsons, trigger_info, self.scratch_dirpath, max_epochs=max_epochs)
             self.arm_dict[lenn] = dict()
             self.arm_dict[lenn]['handler'] = act_inc
             self.arm_dict[lenn]['trigger_info'] = trigger_info
