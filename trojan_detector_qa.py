@@ -130,7 +130,7 @@ def test_trigger(model, dataloader, trigger_numpy):
     trigger_copy = np.ones(trigger_numpy.shape, dtype=np.float32) * -20
     for k, ord in enumerate(max_ord):
         trigger_copy[k, ord] = 1.0
-    delta = Variable(torch.from_numpy(trigger_numpy))
+    delta = Variable(torch.from_numpy(trigger_copy))
     loss_list, _, acc = trigger_epoch(delta=delta,
                                       model=model,
                                       dataloader=dataloader,
