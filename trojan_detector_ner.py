@@ -7,7 +7,6 @@ import numpy as np
 import torch
 from torch.autograd import Variable
 import torch.nn.functional as F
-from torch.nn import CrossEntropyLoss
 
 from tqdm import tqdm
 
@@ -19,6 +18,7 @@ from rainbow import DQNActor
 
 import hashlib
 import pickle
+
 
 def obj_to_hex(obj):
     s = pickle.dumps(obj)
@@ -145,22 +145,6 @@ def get_embed_model(model):
     return emb
 
 
-def get_weight_cut_numpy(model, delta_mask):
-    emb_model = get_embed_model(model)
-    weight = emb_model.word_embeddings.weight
-
-    if delta_mask is not None:
-        w_list = list()
-        for i in range(delta_mask.shape[0]):
-            sel_idx = (delta_mask[i] > 0)
-            w_list.append(weight[sel_idx, :].data.clone())
-        weight_cut = torch.stack(w_list)
-    else:
-        weight_cut = weight.data.clone()
-
-    return weight_cut.detach().cpu().numpy()
-
-
 def get_weight_cut(model, delta_mask):
     emb_model = get_embed_model(model)
     weight = emb_model.word_embeddings.weight
@@ -169,10 +153,10 @@ def get_weight_cut(model, delta_mask):
         w_list = list()
         for i in range(delta_mask.shape[0]):
             sel_idx = (delta_mask[i] > 0)
-            w_list.append(weight[sel_idx, :].data.clone())
+            w_list.append(weight[sel_idx, :].data)
         weight_cut = torch.stack(w_list)
     else:
-        weight_cut = weight.data.clone()
+        weight_cut = weight.data
 
     return weight_cut
 
@@ -760,7 +744,8 @@ def trojan_detector_ner(pytorch_model, tokenizer, data_jsons, scratch_dirpath):
             #     savepath, action_dim = None, 2
             # else:
             savepath, action_dim = os.path.join(simg_data_fo, 'dqn_record.pkl'), 12
-            inc = DQNActor(trigger_info.desp_str, pytorch_model, tokenizer, data_jsons, TrojanTesterNER, max_epochs=300, scratch_dirpath=scratch_dirpath,
+            inc = DQNActor(trigger_info.desp_str, pytorch_model, tokenizer, data_jsons, TrojanTesterNER, max_epochs=300,
+                           scratch_dirpath=scratch_dirpath,
                            savepath=savepath, action_dim=action_dim)
             inc_list.append(inc)
         return inc_list
@@ -794,7 +779,7 @@ def trojan_detector_ner(pytorch_model, tokenizer, data_jsons, scratch_dirpath):
     def find_best(karm_dict, return_valied=True):
         for k in karm_dict:
             karm_dict[k]['sort_sc'] = karm_dict[k]['score'] * np.log(karm_dict[k]['run_epochs']) - (
-                        karm_dict[k]['te_asr'] > 0.9999) * 100
+                    karm_dict[k]['te_asr'] > 0.9999) * 100
         sorted_keys = sorted(list(karm_dict.keys()), key=lambda k: karm_dict[k]['sort_sc'])
         best_sc, best_k = None, None
         for k in sorted_keys:
@@ -922,6 +907,10 @@ def trojan_detector_ner(pytorch_model, tokenizer, data_jsons, scratch_dirpath):
     karm_dict = warmup_run(arm_list, max_epochs=5, early_stop=True)
     karm_keys = list(karm_dict.keys())
 
+    stalled = 0
+    stalled_patience = 10
+    g_best_sc = None
+
     max_rounds = 160
     for round in range(max_rounds):
         best_sc, best_k = find_best(karm_dict, return_valied=True)
@@ -929,8 +918,14 @@ def trojan_detector_ner(pytorch_model, tokenizer, data_jsons, scratch_dirpath):
             break
         print('-' * 20, '>')
         print('round:', round)
-        seed = np.random.rand()
-        if seed < 0.3:
+
+        if g_best_sc is None or best_sc < g_best_sc:
+            g_best_sc = best_sc
+            stalled = 0
+        else:
+            stalled += 1
+
+        if stalled >= stalled_patience:
             best_k = np.random.choice(karm_keys, 1)[0]
 
         karm_dict = step(best_k, karm_dict, max_epochs=10)

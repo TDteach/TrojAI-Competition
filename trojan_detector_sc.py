@@ -129,10 +129,10 @@ def get_weight_cut(model, delta_mask):
         w_list = list()
         for i in range(delta_mask.shape[0]):
             sel_idx = (delta_mask[i] > 0.5)
-            w_list.append(weight[sel_idx, :].data.clone())
+            w_list.append(weight[sel_idx, :].data)
         weight_cut = torch.stack(w_list)
     else:
-        weight_cut = weight.data.clone()
+        weight_cut = weight.data
 
     return weight_cut
 
@@ -853,6 +853,10 @@ def trojan_detector_sc(pytorch_model, tokenizer, data_jsons, scratch_dirpath):
         exit(0)
     '''
 
+    stalled = 0
+    stalled_patience = 10
+    g_best_sc = None
+
     max_rounds = 160
     for round in range(max_rounds):
         best_sc, best_k = find_best(karm_dict, return_valied=True)
@@ -860,8 +864,14 @@ def trojan_detector_sc(pytorch_model, tokenizer, data_jsons, scratch_dirpath):
             break
         print('-' * 20, '>')
         print('round:', round)
-        seed = np.random.rand()
-        if seed < 0.3:
+
+        if g_best_sc is None or best_sc < g_best_sc:
+            g_best_sc = best_sc
+            stalled = 0
+        else:
+            stalled += 1
+
+        if stalled >= stalled_patience:
             best_k = np.random.choice(karm_keys, 1)[0]
 
         karm_dict = step(best_k, karm_dict, max_epochs=10)
