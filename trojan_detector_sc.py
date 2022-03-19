@@ -708,6 +708,8 @@ def final_deal(data):
 def trojan_detector_sc(pytorch_model, tokenizer, data_jsons, scratch_dirpath):
     pytorch_model.eval()
 
+    eta = 1.0 / 0.95  # degrade parameters
+
     def setup_list(attempt_list):
         inc_list = list()
         for trigger_info in attempt_list:
@@ -727,6 +729,7 @@ def trojan_detector_sc(pytorch_model, tokenizer, data_jsons, scratch_dirpath):
             print('run', inc.desp_str, max_epochs, 'epochs')
             rst_dict = inc.run(max_epochs=max_epochs)
             karm_dict[k] = rst_dict
+            karm_dict[k]['tried_times'] = 0
             # early_stop
             if early_stop and rst_dict['te_asr'] > 0.9999:
                 break
@@ -741,15 +744,16 @@ def trojan_detector_sc(pytorch_model, tokenizer, data_jsons, scratch_dirpath):
             karm_dict[k]['over'] = True
             print('instance ', inc.desp_str, 'to its max epochs')
         else:
-            cur_epochs = karm_dict[k]['run_epochs']
+            old_dict = karm_dict[k]
             karm_dict[k] = rst_dict
-            karm_dict[k]['run_epochs'] += cur_epochs
+            karm_dict[k]['run_epochs'] += old_dict['run_epochs']
+            karm_dict[k]['tried_times'] = old_dict['tried_times'] + 1
         return karm_dict
 
     def find_best(karm_dict, return_valied=True):
         for k in karm_dict:
-            karm_dict[k]['sort_sc'] = karm_dict[k]['score'] * np.log(karm_dict[k]['run_epochs']) - (
-                    karm_dict[k]['te_asr'] > 0.9999) * 100
+            karm_dict[k]['sort_sc'] = karm_dict[k]['score'] * np.power(eta, karm_dict[k]['tried_times']) \
+                                      - (karm_dict[k]['te_asr'] > 0.9999) * 100
         sorted_keys = sorted(list(karm_dict.keys()), key=lambda k: karm_dict[k]['sort_sc'])
         best_sc, best_k = None, None
         for k in sorted_keys:

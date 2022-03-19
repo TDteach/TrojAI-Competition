@@ -528,7 +528,7 @@ class DQNAgent:
 
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, np.float64, bool]:
         """Take an action and return the response of the env."""
-        next_state, reward, done, _ = self.env.step(action)
+        next_state, reward, done, _, _ = self.env.step(action)
 
         if not self.is_test:
             self.transition += [reward, next_state, done]
@@ -717,9 +717,9 @@ class DQNAgent:
             scores: List[float],
             losses: List[float],
     ):
-        from game_env import PLOTOUT
-        print('PLOTOUT', PLOTOUT)
-        if not PLOTOUT:
+        import game_env.PLOTOUT
+        print('PLOTOUT', game_env.PLOTOUT)
+        if not game_env.PLOTOUT:
             return
         """Plot the training progresses."""
         # clear_output(True)
@@ -760,7 +760,7 @@ class DQNActor:
                  ):
         self.scratch_dirpath = scratch_dirpath
         self.desp_str = desp_str
-        self.obs_dim = 12
+        self.obs_dim = 12 * 2
         self.action_dim = action_dim
         self.v_min = 0
         self.v_max = 200
@@ -819,7 +819,7 @@ class DQNActor:
 
     def run(self, max_epochs=5):
         action = self.select_action_func(self.state)
-        next_state, reward, done, max_te_asr, rst_dict = self.env.step(action, max_epochs=max_epochs, return_dict=True)
+        next_state, reward, done, max_te_asr, min_score, rst_dict = self.env.step(action, max_epochs=max_epochs, return_dict=True)
 
         self.state = next_state
         self.done = done
@@ -832,7 +832,7 @@ class DQNActor:
 
         ret_dict = {
             'handler': self,
-            'score': float(np.min(next_state)),
+            'score': min_score,
             'rst_dict': rst_dict,
             'run_epochs': max_epochs,
             'tr_asr': tr_asr,

@@ -9,12 +9,12 @@ import datasets
 
 datasets.utils.tqdm_utils._active = False
 
-PLOTOUT = False
+PLOTOUT = True
 
 
 class XXEnv:
     def __init__(self, scratch_dirpath):
-        self.obs_dim = 12
+        self.obs_dim = 12 * 2
         self.action_dim = 12
         self.random_inc = random.Random()
         self.scratch_dirpath = scratch_dirpath
@@ -111,7 +111,7 @@ class XXEnv:
 
         return self.reset_with_desp(desp_str, pytorch_model, tokenizer, [examples_filepath], inc_class)
 
-    def reset_with_desp(self, desp_str, pytorch_model, tokenizer, data_jsons, inc_class, max_epochs=100,
+    def reset_with_desp(self, desp_str, pytorch_model, tokenizer, data_jsons, inc_class, max_epochs=300,
                         action_dim=None):
         if action_dim is None:
             action_dim = self.action_dim
@@ -123,16 +123,24 @@ class XXEnv:
             self.arm_dict[lenn] = dict()
             self.arm_dict[lenn]['handler'] = act_inc
             self.arm_dict[lenn]['trigger_info'] = trigger_info
+            self.arm_dict[lenn]['score'] = None
+            self.arm_dict[lenn]['stalled'] = 0
+            self.arm_dict[lenn]['tried_times'] = 0
         self.key_list = sorted(list(self.arm_dict.keys()))
         self._warmup(max_epochs=1)
-        next_state, _, _ = self.get_state()
+        next_state, _, _, _ = self.get_state()
         return next_state
 
     def _step(self, key, max_epochs=10, return_dict=False):
         inc = self.arm_dict[key]['handler']
         rst_dict = inc.run(max_epochs=max_epochs)
         if rst_dict:
-            self.arm_dict[key]['score'] = rst_dict['score']
+            if self.arm_dict[key]['score'] is None or rst_dict['score'] < self.arm_dict[key]['score']:
+                self.arm_dict[key]['score'] = rst_dict['score']
+                self.arm_dict[key]['stalled'] = 0
+            else:
+                self.arm_dict[key]['stalled'] += 1
+            self.arm_dict[key]['tried_times'] += 1
             te_asr, te_loss = inc.test()
             self.arm_dict[key]['te_asr'] = te_asr / 100
             print('_step', str(inc.trigger_info), 'score:%.2f' % rst_dict['score'], 'te_asr:%.2f%%' % te_asr)
@@ -162,16 +170,20 @@ class XXEnv:
 
     def get_state(self):
         list_state = list()
-        max_te_asr = 0
-        maxkey_te_asr = 0
+        max_te_asr = -1
+        min_score = None
         for key in self.key_list:
             list_state.append(self.arm_dict[key]['score'])
-            max_te_asr = max(max_te_asr, self.arm_dict[key]['te_asr'])
-            max_trigger_info = self.arm_dict[key]['trigger_info']
+            list_state.append(self.arm_dict[key]['tried_times'])
+            if self.arm_dict[key]['te_asr'] > max_te_asr:
+                max_te_asr = self.arm_dict[key]['te_asr']
+                max_trigger_info = self.arm_dict[key]['trigger_info']
+            if min_score is None or self.arm_dict[key]['score'] < min_score:
+                min_score = self.arm_dict[key]['score']
         reward = max_te_asr
         if self.target_lenn:
             reward += (max_trigger_info.n == self.target_lenn)
-        return np.asarray(list_state), reward - 1, max_te_asr
+        return np.asarray(list_state), reward - 1, max_te_asr, min_score
 
     def step(self, action, max_epochs=10, return_dict=False):
         print('act ', action)
@@ -180,12 +192,14 @@ class XXEnv:
             done, ret_dict = self._step(key, max_epochs=max_epochs, return_dict=True)
         else:
             done = self._step(key, max_epochs=max_epochs, return_dict=False)
-        next_state, reward, max_te_asr = self.get_state()
-        if not done:
-            done = self.is_done(max_te_asr)
+        next_state, reward, max_te_asr, min_score = self.get_state()
+        done_asr = self.is_done(max_te_asr)
+        if done and not done_asr:
+            reward -= 200
+        done = (done or done_asr)
         if return_dict:
-            return next_state, reward, done, max_te_asr, ret_dict
-        return next_state, reward, done, max_te_asr
+            return next_state, reward, done, max_te_asr, min_score, ret_dict
+        return next_state, reward, done, max_te_asr, min_score
 
 
 def main():
