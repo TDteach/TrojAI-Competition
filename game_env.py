@@ -186,16 +186,16 @@ class XXEnv:
         return np.asarray(list_state), reward - 1, max_te_asr, min_score
 
     def step(self, action, max_epochs=10, return_dict=False):
-        print('act ', action)
         key = int(action)
         if return_dict:
             done, ret_dict = self._step(key, max_epochs=max_epochs, return_dict=True)
         else:
             done = self._step(key, max_epochs=max_epochs, return_dict=False)
         next_state, reward, max_te_asr, min_score = self.get_state()
+        print('act ', action, 'reward', reward)
         done_asr = self.is_done(max_te_asr)
         if done and not done_asr:
-            reward -= 200
+            reward -= 10
         done = (done or done_asr)
         if return_dict:
             return next_state, reward, done, max_te_asr, min_score, ret_dict
