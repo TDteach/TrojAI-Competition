@@ -717,9 +717,9 @@ class DQNAgent:
             scores: List[float],
             losses: List[float],
     ):
-        import game_env.PLOTOUT
-        print('PLOTOUT', game_env.PLOTOUT)
-        if not game_env.PLOTOUT:
+        from game_env import PLOTOUT
+        print('PLOTOUT', PLOTOUT)
+        if not PLOTOUT:
             return
         """Plot the training progresses."""
         # clear_output(True)
