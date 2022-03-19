@@ -737,7 +737,7 @@ def trojan_detector_sc(pytorch_model, tokenizer, data_jsons, scratch_dirpath):
         inc = karm_dict[k]['handler']
         print('run', inc.desp_str, max_epochs, 'epochs')
         rst_dict = inc.run(max_epochs=max_epochs)
-        if rst_dict is None:
+        if rst_dict is None or rst_dict['done']:
             karm_dict[k]['over'] = True
             print('instance ', inc.desp_str, 'to its max epochs')
         else:
