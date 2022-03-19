@@ -718,6 +718,7 @@ class DQNAgent:
             losses: List[float],
     ):
         from game_env import PLOTOUT
+        print('PLOTOUT', PLOTOUT)
         if not PLOTOUT:
             return
         """Plot the training progresses."""
@@ -869,7 +870,9 @@ def main():
     target_update = 100
 
     # train
-    agent = DQNAgent(env, memory_size, batch_size, target_update, dqn_savepath='dqn_record.pkl')
+    dqn_savepath = 'dqn_record.pkl'
+    dqn_savepath = None
+    agent = DQNAgent(env, memory_size, batch_size, target_update, dqn_savepath=dqn_savepath)
 
     agent.train(num_frames)
 

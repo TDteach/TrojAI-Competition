@@ -9,7 +9,7 @@ import datasets
 
 datasets.utils.tqdm_utils._active = False
 
-PLOTOUT = True
+PLOTOUT = False
 
 
 class XXEnv:

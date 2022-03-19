@@ -93,7 +93,7 @@ def add_trigger_template_into_data(data, trigger_info):
     return new_data, wk, new_src_pos
 
 
-def test_trigger(model, dataloader, trigger_numpy, return_logits=False, weight_cut=None):
+def test_trigger(model, dataloader, trigger_numpy, return_logits=False):
     model.eval()
     trigger_copy = trigger_numpy.copy()
     max_ord = np.argmax(trigger_copy, axis=1)
@@ -110,7 +110,7 @@ def test_trigger(model, dataloader, trigger_numpy, return_logits=False, weight_c
         loss_list, _, acc, all_logits = trigger_epoch(delta=delta,
                                                       model=model,
                                                       dataloader=dataloader,
-                                                      weight_cut=weight_cut,
+                                                      weight_cut=None,
                                                       optimizer=None,
                                                       temperature=1.0,
                                                       delta_mask=None,
@@ -122,7 +122,7 @@ def test_trigger(model, dataloader, trigger_numpy, return_logits=False, weight_c
     loss_list, _, acc = trigger_epoch(delta=delta,
                                       model=model,
                                       dataloader=dataloader,
-                                      weight_cut=weight_cut,
+                                      weight_cut=None,
                                       optimizer=None,
                                       temperature=1.0,
                                       delta_mask=None,
@@ -188,9 +188,7 @@ def trigger_epoch(delta,
                   return_logits=False,
                   ):
     if weight_cut is None:
-        print('________________-')
         weight_cut = get_weight_cut(model, delta_mask)
-        exit(0)
 
     insert_many = len(delta)
     device = model.device
@@ -288,8 +286,7 @@ def trigger_epoch(delta,
 
         if optimizer:
             optimizer.zero_grad()
-            # loss.backward(retain_graph=True)
-            loss.backward()
+            loss.backward(retain_graph=True)
             optimizer.step()
 
         torch.cuda.empty_cache()
@@ -481,8 +478,6 @@ class TrojanTesterNER(TrojanTester):
         self.delta = None
         self.params = None
         self.max_epochs = max_epochs
-        weigth_cut_numpy = get_weight_cut_numpy(model, delta_mask=None)
-        self.weight_cut = torch.from_numpy(weigth_cut_numpy).to(model.device)
 
     def build_dataset(self, data_jsons):
         raw_dataset = datasets.load_dataset('json', data_files=data_jsons,
@@ -580,7 +575,7 @@ class TrojanTesterNER(TrojanTester):
 
         delta = self.delta
         delta_mask = self.delta_mask
-        weight_cut = self.weight_cut
+        weight_cut = get_weight_cut(self.model, delta_mask)
 
         if not hasattr(self, 'best_rst'):
             print('init best_rst')
@@ -660,7 +655,7 @@ class TrojanTesterNER(TrojanTester):
                 zero_delta[i, sel_idx] = delta_v[i]
             delta_v = zero_delta
 
-        train_asr, loss_avg = test_trigger(self.model, self.tr_dataloader, delta_v, weight_cut=self.weight_cut)
+        train_asr, loss_avg = test_trigger(self.model, self.tr_dataloader, delta_v)
         print('train ASR: %.2f%%' % train_asr)
 
         ret_rst = {'loss': self.best_rst['loss'],
@@ -676,7 +671,7 @@ class TrojanTesterNER(TrojanTester):
 
     def test(self):
         delta_numpy = self.attempt_records[-1][0]
-        te_acc, te_loss = test_trigger(self.model, self.te_dataloader, delta_numpy, weight_cut=self.weight_cut)
+        te_acc, te_loss = test_trigger(self.model, self.te_dataloader, delta_numpy)
         return te_acc, te_loss
 
 
@@ -819,7 +814,7 @@ def trojan_detector_ner(pytorch_model, tokenizer, data_jsons, scratch_dirpath):
 
         zero_delta = np.zeros([1, tot_tokens], dtype=np.float32)
 
-        acc, avg_loss, all_logits = test_trigger(inc.model, inc.te_dataloader, zero_delta, return_logits=True, weight_cut=inc.weight_cut)
+        acc, avg_loss, all_logits = test_trigger(inc.model, inc.te_dataloader, zero_delta, return_logits=True)
 
         topk_index = torch.topk(all_logits, num_classes // 2, dim=1)[1]
         topk_logit = torch.topk(all_logits, num_classes // 2, dim=1)[0]
