@@ -717,6 +717,9 @@ class DQNAgent:
             scores: List[float],
             losses: List[float],
     ):
+        from game_env import PLOTOUT
+        if not PLOTOUT:
+            return
         """Plot the training progresses."""
         # clear_output(True)
         import matplotlib.pyplot as plt
@@ -850,7 +853,7 @@ def main():
     # env_id = "CartPole-v0"
     # env = gym.make(env_id)
 
-    env = XXEnv()
+    env = XXEnv('./scartch')
 
     seed = 777
 

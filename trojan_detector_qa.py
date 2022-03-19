@@ -818,7 +818,7 @@ def trojan_detector_qa(pytorch_model, tokenizer, data_jsons, scratch_dirpath):
         inc_list = list()
         for trigger_info in attempt_list:
             if 'empty' in trigger_info.desp_str:
-                savepath, action_dim = None, 2
+                savepath, action_dim = None, 5
             else:
                 savepath, action_dim = os.path.join(simg_data_fo, 'dqn_record.pkl'), 12
             inc = DQNActor(trigger_info.desp_str, pytorch_model, tokenizer, data_jsons, TrojanTesterQA, scratch_dirpath=scratch_dirpath, max_epochs=300,

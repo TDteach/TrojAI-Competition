@@ -9,6 +9,8 @@ import datasets
 
 datasets.utils.tqdm_utils._active = False
 
+PLOTOUT = True
+
 
 class XXEnv:
     def __init__(self, scratch_dirpath):
@@ -109,13 +111,15 @@ class XXEnv:
 
         return self.reset_with_desp(desp_str, pytorch_model, tokenizer, [examples_filepath], inc_class)
 
-    def reset_with_desp(self, desp_str, pytorch_model, tokenizer, data_jsons, inc_class, max_epochs=100, action_dim=None):
+    def reset_with_desp(self, desp_str, pytorch_model, tokenizer, data_jsons, inc_class, max_epochs=100,
+                        action_dim=None):
         if action_dim is None:
             action_dim = self.action_dim
         self.arm_dict = dict()
         for lenn in range(action_dim):
             trigger_info = TriggerInfo(desp_str, lenn + 1)
-            act_inc = inc_class(pytorch_model, tokenizer, data_jsons, trigger_info, self.scratch_dirpath, max_epochs=max_epochs)
+            act_inc = inc_class(pytorch_model, tokenizer, data_jsons, trigger_info, self.scratch_dirpath,
+                                max_epochs=max_epochs)
             self.arm_dict[lenn] = dict()
             self.arm_dict[lenn]['handler'] = act_inc
             self.arm_dict[lenn]['trigger_info'] = trigger_info
@@ -124,7 +128,7 @@ class XXEnv:
         next_state, _, _ = self.get_state()
         return next_state
 
-    def _step(self, key, max_epochs=5, return_dict=False):
+    def _step(self, key, max_epochs=10, return_dict=False):
         inc = self.arm_dict[key]['handler']
         rst_dict = inc.run(max_epochs=max_epochs)
         if rst_dict:
@@ -167,9 +171,9 @@ class XXEnv:
         reward = max_te_asr
         if self.target_lenn:
             reward += (max_trigger_info.n == self.target_lenn)
-        return np.asarray(list_state), reward-1, max_te_asr
+        return np.asarray(list_state), reward - 1, max_te_asr
 
-    def step(self, action, max_epochs=5, return_dict=False):
+    def step(self, action, max_epochs=10, return_dict=False):
         print('act ', action)
         key = int(action)
         if return_dict:

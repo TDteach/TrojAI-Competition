@@ -711,10 +711,10 @@ def trojan_detector_sc(pytorch_model, tokenizer, data_jsons, scratch_dirpath):
     def setup_list(attempt_list):
         inc_list = list()
         for trigger_info in attempt_list:
-            if 'local' in trigger_info.desp_str:
-                savepath, action_dim = None, 2
-            else:
-                savepath, action_dim = os.path.join(simg_data_fo, 'dqn_record.pkl'), 12
+            # if 'local' in trigger_info.desp_str:
+            #     savepath, action_dim = None, 2
+            # else:
+            savepath, action_dim = os.path.join(simg_data_fo, 'dqn_record.pkl'), 12
             inc = DQNActor(trigger_info.desp_str, pytorch_model, tokenizer, data_jsons, TrojanTesterSC, max_epochs=300, scratch_dirpath=scratch_dirpath,
                            savepath=savepath, action_dim=action_dim)
             inc_list.append(inc)
