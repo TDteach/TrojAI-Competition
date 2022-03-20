@@ -799,6 +799,7 @@ class DQNActor:
         self.reset()
 
     def select_action(self, state: np.ndarray) -> np.ndarray:
+        # print('select dqn')
         selected_action = self.dqn(
             torch.FloatTensor(state).to(self.device)
         ).argmax()
@@ -807,9 +808,18 @@ class DQNActor:
         return selected_action
 
     def select_action_with_sigma(self, state: np.ndarray, sigma=0.3) -> np.ndarray:
-        selected_action = np.argmax(state)
+        maxv=None
+        maxk=None
+        step = len(state)//self.action_dim
+        for i in range(0,len(state),step):
+            if maxv is None or state[i]>maxv:
+                maxv = state[i]
+                maxk = i
+        # print('select sigma',len(state), state, maxk)
+        # selected_action = np.argmax(state)
+        selected_action = maxk//step
         if random.random() < sigma:
-            selected_action = random.choice(list(range(len(state))))
+            selected_action = random.choice(list(range(self.action_dim)))
         return selected_action
 
     def prepare_run(self, desp_str, pytorch_model, tokenizer, data_jsons, inc_class, max_epochs=200, action_dim=12):
