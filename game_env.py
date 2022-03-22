@@ -127,6 +127,8 @@ class XXEnv:
             self.arm_dict[lenn]['score'] = None
             self.arm_dict[lenn]['stalled'] = 0
             self.arm_dict[lenn]['tried_times'] = 0
+            self.arm_dict[lenn]['last_te_asr'] = 0
+            self.arm_dict[lenn]['te_asr'] = 0
         self.key_list = sorted(list(self.arm_dict.keys()))
         self._warmup(max_epochs=1)
         next_state, _, _, _ = self.get_state()
@@ -143,6 +145,7 @@ class XXEnv:
                 self.arm_dict[key]['stalled'] += 1
             self.arm_dict[key]['tried_times'] += 1
             te_asr, te_loss = inc.test()
+            self.arm_dict[key]['last_te_asr'] = self.arm_dict[key]['te_asr']
             self.arm_dict[key]['te_asr'] = te_asr / 100
             print('_step', str(inc.trigger_info), 'score:%.2f' % rst_dict['score'], 'te_asr:%.2f%%' % te_asr, 'tried_times:', self.arm_dict[key]['tried_times'])
             done = False
@@ -182,11 +185,14 @@ class XXEnv:
             if min_score is None or self.arm_dict[key]['score'] < min_score:
                 min_score = self.arm_dict[key]['score']
         reward = max_te_asr
-        if action:
+        if action is not None:
             reward = self.arm_dict[action]['te_asr']
-        if self.target_lenn and action:
+            if self.target_lenn and self.arm_dict[action]['trigger_info'].n == self.target_lenn:
+                reward = 10 + (reward-self.arm_dict[action]['last_te_asr'])*1000
+            else:
+                reward -= 1
             reward += (self.arm_dict[action]['trigger_info'].n == self.target_lenn)
-        return np.asarray(list_state), reward - 1, max_te_asr, min_score
+        return np.asarray(list_state), reward, max_te_asr, min_score
 
     def step(self, action, max_epochs=10, return_dict=False):
         key = int(action)

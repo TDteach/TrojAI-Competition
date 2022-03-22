@@ -515,7 +515,7 @@ class DQNAgent:
         # mode: train / test
         self.is_test = False
 
-    def select_action(self, state: np.ndarray, soft_sampling=False) -> np.ndarray:
+    def select_action(self, state: np.ndarray, soft_sampling=True) -> np.ndarray:
         """Select an action from the input state."""
         # NoisyNet: no epsilon greedy action selection
         action_logits = self.dqn(
@@ -740,6 +740,7 @@ class DQNAgent:
         plt.subplot(132)
         plt.title('loss')
         plt.plot(losses)
+        plt.ylim((0,3))
         plt.show()
 
     def save(self, savepath='haha.pkl', train_record=None):
