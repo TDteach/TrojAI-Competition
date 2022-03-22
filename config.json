@@ -5,6 +5,6 @@
         "memory_size": 10000,
         "batch_size": 128,
         "target_update": 100,
-        "plot_out": true
+        "plot_out": false
     }
 }
