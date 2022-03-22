@@ -289,7 +289,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--metaparameters_filepath',
                         help='Path to JSON file containing values of tunable paramaters to be used when evaluating models.',
-                        default=os.path.join(simg_data_fo, 'metaparameters.json'),
+                        # default=os.path.join(simg_data_fo, 'metaparameters.json'),
                         action=ActionConfigFile)
     parser.add_argument('--schema_filepath', type=str,
                         help='Path to a schema file in JSON Schema format against which to validate the config file.',
