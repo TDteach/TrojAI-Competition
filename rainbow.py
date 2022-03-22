@@ -899,7 +899,7 @@ def main():
 
     # train
     dqn_savepath = 'dqn_record.pkl'
-    dqn_savepath = None
+    # dqn_savepath = None
     agent = DQNAgent(env, memory_size, batch_size, target_update, dqn_savepath=dqn_savepath)
 
     agent.train(num_frames)

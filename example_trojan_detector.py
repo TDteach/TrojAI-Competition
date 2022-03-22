@@ -274,6 +274,7 @@ if __name__ == "__main__":
     parser.add_argument('--tokenizer_filepath', type=str,
                         help='File path to the pytorch model (.pt) file containing the correct tokenizer to be used with the model_filepath.')
     parser.add_argument('--features_filepath', type=str,
+                        default=os.path.join(simg_data_fo, 'features.csv'),
                         help='File path to the file where intermediate detector features may be written. After execution this csv file should contain a two rows, the first row contains the feature names (you should be consistent across your detectors), the second row contains the value for each of the column names.')
     parser.add_argument('--result_filepath', type=str,
                         help='File path to the file where output result should be written. After execution this file should contain a single line with a single floating point trojan probability.')
@@ -288,12 +289,14 @@ if __name__ == "__main__":
 
     parser.add_argument('--metaparameters_filepath',
                         help='Path to JSON file containing values of tunable paramaters to be used when evaluating models.',
+                        default=os.path.join(simg_data_fo, 'metaparameters.json'),
                         action=ActionConfigFile)
     parser.add_argument('--schema_filepath', type=str,
                         help='Path to a schema file in JSON Schema format against which to validate the config file.',
                         default=os.path.join(simg_data_fo, 'metaparameters_schema.json'),
                         )
     parser.add_argument('--learned_parameters_dirpath', type=str,
+                        default=os.path.join(simg_data_fo, 'learned_parameters'),
                         help='Path to a directory containing parameter data (model weights, etc.) to be used when evaluating models.  If --configure_mode is set, these will instead be overwritten with the newly-configured parameters.')
 
     parser.add_argument('--configure_mode',
