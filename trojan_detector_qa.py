@@ -555,7 +555,7 @@ class TrojanTesterQA(TrojanTester):
         ndata = len(raw_dataset)
         print('tot len:', ndata)
         ntr = min(int(ndata * 0.8), max(self.batch_size * 3, 24))
-        nte = min(ndata - ntr, max(self.batch_size * 6, 64))
+        nte = min(ndata - ntr, max(self.batch_size * 6, 32))
         tokenized_dataset = tokenize_for_qa(self.tokenizer, raw_dataset, trigger_info=self.trigger_info, data_limit=ntr+ntr+nte)
         # tokenized_dataset = tokenize_for_qa(self.tokenizer, raw_dataset, trigger_info=None)
         tokenized_dataset.set_format('pt', columns=['input_ids', 'attention_mask', 'token_type_ids', 'start_positions',
@@ -578,6 +578,7 @@ class TrojanTesterQA(TrojanTester):
         end_p = 1.0
 
         if len(self.attempt_records) == 0 or restart:
+            print('restart')
             self.params = {
                 'S': 30,
                 'beta': 0.3,
@@ -594,9 +595,10 @@ class TrojanTesterQA(TrojanTester):
             self.current_epoch = -1
             max_epochs = max_epochs
         else:
-            max_epochs = min(self.current_epoch + max_epochs, self.max_epochs)
+            max_epochs = min(self.current_epoch + 1 + max_epochs, self.max_epochs)
+            print('no restart', max_epochs)
 
-        if self.current_epoch + 1 >= self.max_epochs:
+        if self.check_done():
             return None
 
         best_rst = self._reverse_trigger(init_delta=None,
@@ -606,6 +608,14 @@ class TrojanTesterQA(TrojanTester):
         self.attempt_records.append([best_rst['data'], best_rst])
 
         return best_rst
+
+    def check_done(self):
+        if self.current_epoch + 1 >= self.max_epochs:
+            return True
+        if hasattr(self, 'best_rst'):
+            if self.best_rst['loss'] < self.params['beta'] and self.best_rst['consc'] > 1 - self.params['epsilon']:
+                return True
+        return False
 
     def _reverse_trigger(self,
                          max_epochs,
@@ -694,6 +704,16 @@ class TrojanTesterQA(TrojanTester):
             if self.current_epoch * 2 > self.max_epochs or (self.best_rst and self.best_rst['loss'] < beta):
                 end_position_rate = 1.0
 
+            if self.current_epoch > 0 and self.current_epoch % S == 0:
+                if stage_best_rst['loss'] < beta:
+                    temperature /= C
+                    # delta.data = self.best_rst['data']
+                else:
+                    temperature = min(temperature * D, U)
+                    delta.data += torch.normal(0, std, size=delta.shape)
+                    self.optimizer = torch.optim.Adam([self.delta], lr=0.5)
+                stage_best_rst = None
+
             loss_list, soft_delta_numpy = trigger_epoch(delta=delta,
                                                         model=self.model,
                                                         dataloader=self.tr_dataloader,
@@ -720,22 +740,12 @@ class TrojanTesterQA(TrojanTester):
             if self.best_rst is None or stage_best_rst['score'] < self.best_rst['score']:
                 self.best_rst = stage_best_rst.copy()
 
-            if epoch_avg_loss < beta and consc > 1 - epsilon:
-                break
-
             if enable_tqdm:
                 pbar.set_description('epoch %d: temp %.2f, loss %.2f, condense %.2f / %d, score %.2f' % (
                     epoch, temperature, epoch_avg_loss, consc * insert_many, insert_many, jd_score))
 
-            if self.current_epoch > 0 and self.current_epoch % S == 0:
-                if stage_best_rst['loss'] < beta:
-                    temperature /= C
-                    # delta.data = self.best_rst['data']
-                else:
-                    temperature = min(temperature * D, U)
-                    delta.data += torch.normal(0, std, size=delta.shape)
-                stage_best_rst = None
-                self.optimizer = torch.optim.Adam([self.delta], lr=0.5)
+            if self.check_done():
+                break
 
         self.params['temperature'] = temperature  # update temperature
         self.delta = delta
@@ -760,7 +770,7 @@ class TrojanTesterQA(TrojanTester):
                    'tr_asr': train_asr,
                    'val_loss': loss_avg,
                    }
-        print('return', self.best_rst['score'], ret_rst['score'])
+        print('return', 'score:', ret_rst['score'], 'loss:', ret_rst['loss'], 'consc:', ret_rst['consc'])
         return ret_rst
 
     def test(self):

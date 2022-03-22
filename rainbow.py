@@ -17,6 +17,8 @@ from segment_tree import MinSegmentTree, SumSegmentTree
 import pickle
 from game_env import XXEnv
 
+from utils import read_config
+
 
 class ReplayBuffer:
     """A simple numpy replay buffer."""
@@ -513,13 +515,18 @@ class DQNAgent:
         # mode: train / test
         self.is_test = False
 
-    def select_action(self, state: np.ndarray) -> np.ndarray:
+    def select_action(self, state: np.ndarray, soft_sampling=False) -> np.ndarray:
         """Select an action from the input state."""
         # NoisyNet: no epsilon greedy action selection
-        selected_action = self.dqn(
+        action_logits = self.dqn(
             torch.FloatTensor(state).to(self.device)
-        ).argmax()
-        selected_action = selected_action.detach().cpu().numpy()
+        )
+        if soft_sampling:
+            action_probs = F.softmax(action_logits).detach().cpu().numpy()
+            selected_action = np.random.choice(np.arange(self.dqn.out_dim), 1, p=action_probs[0])
+        else:
+            selected_action = action_logits.argmax()
+            selected_action = selected_action.detach().cpu().numpy()
 
         if not self.is_test:
             self.transition = [state, selected_action]
@@ -630,7 +637,8 @@ class DQNAgent:
 
             # plotting
             if frame_idx % plotting_interval == 0:
-                self.save()
+                train_record = {'scores':scores, 'losses': losses}
+                self.save(train_record=train_record)
                 self._plot(frame_idx, scores, losses)
 
         self.env.close()
@@ -717,9 +725,10 @@ class DQNAgent:
             scores: List[float],
             losses: List[float],
     ):
-        from game_env import PLOTOUT
-        print('PLOTOUT', PLOTOUT)
-        if not PLOTOUT:
+        _config = read_config()
+        plot_out = _config['rainbow']['plot_out']
+        print('PLOTOUT', plot_out)
+        if not plot_out:
             return
         """Plot the training progresses."""
         # clear_output(True)
@@ -733,7 +742,7 @@ class DQNAgent:
         plt.plot(losses)
         plt.show()
 
-    def save(self, savepath='haha.pkl'):
+    def save(self, savepath='haha.pkl', train_record=None):
         store_dict = {
             'dqn_state_dict': self.dqn.state_dict(),
             'obs_dim': self.dqn.in_dim,
@@ -742,6 +751,8 @@ class DQNAgent:
             'v_max': self.v_max,
             'atom_size': self.atom_size,
         }
+        if train_record:
+            store_dict['train_record'] = train_record
         with open(savepath, "wb") as f:
             pickle.dump(store_dict, f)
 
@@ -754,13 +765,13 @@ class DQNActor:
                  data_jsons,
                  inc_class,
                  scratch_dirpath,
-                 action_dim=12,
+                 action_dim=13,
                  max_epochs=200,
                  savepath=None,
                  ):
         self.scratch_dirpath = scratch_dirpath
         self.desp_str = desp_str
-        self.obs_dim = 12 * 2
+        self.obs_dim = 13 * 2
         self.action_dim = action_dim
         self.v_min = 0
         self.v_max = 200
@@ -798,31 +809,37 @@ class DQNActor:
             setattr(self, key, store_dict[key])
         self.reset()
 
-    def select_action(self, state: np.ndarray) -> np.ndarray:
-        # print('select dqn')
-        selected_action = self.dqn(
+    def select_action(self, state: np.ndarray, soft_sampling=True) -> np.ndarray:
+        """Select an action from the input state."""
+        # NoisyNet: no epsilon greedy action selection
+        action_logits = self.dqn(
             torch.FloatTensor(state).to(self.device)
-        ).argmax()
-        selected_action = selected_action.detach().cpu().numpy()
+        )
+        if soft_sampling:
+            action_probs = F.softmax(action_logits).detach().cpu().numpy()
+            selected_action = np.random.choice(np.arange(self.dqn.out_dim), 1, p=action_probs[0])
+        else:
+            selected_action = action_logits.argmax()
+            selected_action = selected_action.detach().cpu().numpy()
 
         return selected_action
 
     def select_action_with_sigma(self, state: np.ndarray, sigma=0.3) -> np.ndarray:
-        maxv=None
-        maxk=None
+        minv=None
+        mink=None
         step = len(state)//self.action_dim
         for i in range(0,len(state),step):
-            if maxv is None or state[i]>maxv:
-                maxv = state[i]
-                maxk = i
+            if minv is None or state[i] < minv:
+                minv = state[i]
+                mink = i
         # print('select sigma',len(state), state, maxk)
         # selected_action = np.argmax(state)
-        selected_action = maxk//step
+        selected_action = mink//step
         if random.random() < sigma:
             selected_action = random.choice(list(range(self.action_dim)))
         return selected_action
 
-    def prepare_run(self, desp_str, pytorch_model, tokenizer, data_jsons, inc_class, max_epochs=200, action_dim=12):
+    def prepare_run(self, desp_str, pytorch_model, tokenizer, data_jsons, inc_class, max_epochs=200, action_dim=13):
         self.env = XXEnv(scratch_dirpath=self.scratch_dirpath)
         self.state = self.env.reset_with_desp(desp_str, pytorch_model, tokenizer, data_jsons, inc_class, max_epochs=max_epochs, action_dim=action_dim)
         self.done = False
@@ -864,9 +881,10 @@ def main():
     # env_id = "CartPole-v0"
     # env = gym.make(env_id)
 
-    env = XXEnv('./scartch')
+    env = XXEnv('./scratch')
 
-    seed = 777
+    config = read_config()
+    seed = config['seed']
 
     np.random.seed(seed)
     random.seed(seed)
@@ -874,10 +892,10 @@ def main():
     env.seed(seed)
 
     # parameters
-    num_frames = 20000
-    memory_size = 10000
-    batch_size = 128
-    target_update = 100
+    num_frames = config['rainbow']['num_frames']
+    memory_size = config['rainbow']['memory_size']
+    batch_size = config['rainbow']['batch_size']
+    target_update = config['rainbow']['target_update']
 
     # train
     dqn_savepath = 'dqn_record.pkl'

@@ -470,7 +470,7 @@ class TrojanTesterNER(TrojanTester):
         ndata = len(raw_dataset)
         print('tot len:', ndata)
         ntr = min(int(ndata * 0.8), max(self.batch_size * 3, 24))
-        nte = min(ndata - ntr, max(self.batch_size * 6, 64))
+        nte = min(ndata - ntr, max(self.batch_size * 6, 32))
         tokenized_dataset = tokenize_for_ner(self.tokenizer, raw_dataset, trigger_info=self.trigger_info)
         # tokenized_dataset = tokenize_for_ner(self.tokenizer, raw_dataset, trigger_info=None)
         tokenized_dataset.set_format('pt',
@@ -484,7 +484,7 @@ class TrojanTesterNER(TrojanTester):
         tr_dataset, te_dataset, _ = torch.utils.data.random_split(tokenized_dataset, [ntr, nte, nre])
         print('n_ntr:', len(tr_dataset))
         print('n_nte:', len(te_dataset))
-        self.tr_dataloader = torch.utils.data.DataLoader(tr_dataset, batch_size=self.batch_size, shuffle=False)
+        self.tr_dataloader = torch.utils.data.DataLoader(tr_dataset, batch_size=self.batch_size, shuffle=True)
         # self.te_dataloader = torch.utils.data.DataLoader(tokenized_dataset, batch_size=self.batch_size, shuffle=False)
         self.te_dataloader = torch.utils.data.DataLoader(te_dataset, batch_size=self.batch_size, shuffle=False)
 
@@ -496,6 +496,7 @@ class TrojanTesterNER(TrojanTester):
         end_p = 1.0
 
         if len(self.attempt_records) == 0 or restart:
+            print('restart')
             self.params = {
                 'S': 30,
                 'beta': 0.3,
@@ -511,9 +512,10 @@ class TrojanTesterNER(TrojanTester):
             self.current_epoch = -1
             max_epochs = max_epochs
         else:
-            max_epochs = min(self.current_epoch + max_epochs, self.max_epochs)
+            max_epochs = min(self.current_epoch + 1 + max_epochs, self.max_epochs)
+            print('no restart', max_epochs)
 
-        if self.current_epoch + 1 >= self.max_epochs:
+        if self.check_done():
             return None
 
         best_rst = self._reverse_trigger(init_delta=None,
@@ -523,6 +525,14 @@ class TrojanTesterNER(TrojanTester):
         self.attempt_records.append([best_rst['data'], best_rst])
 
         return best_rst
+
+    def check_done(self):
+        if self.current_epoch + 1 >= self.max_epochs:
+            return True
+        if hasattr(self, 'best_rst'):
+            if self.best_rst['loss'] < self.params['beta'] and self.best_rst['consc'] > 1 - self.params['epsilon']:
+                return True
+        return False
 
     def _reverse_trigger(self,
                          max_epochs,
@@ -585,6 +595,16 @@ class TrojanTesterNER(TrojanTester):
         for epoch in pbar:
             self.current_epoch = epoch
 
+            if self.current_epoch > 0 and self.current_epoch % S == 0:
+                if stage_best_rst['loss'] < beta:
+                    temperature /= C
+                    # delta.data = self.best_rst['data']
+                else:
+                    temperature = min(temperature * D, U)
+                    delta.data += torch.normal(0, std, size=delta.shape)
+                    self.optimizer = torch.optim.Adam([self.delta], lr=0.5)
+                stage_best_rst = None
+
             loss_list, soft_delta_numpy = trigger_epoch(delta=delta,
                                                         model=self.model,
                                                         dataloader=self.tr_dataloader,
@@ -610,22 +630,12 @@ class TrojanTesterNER(TrojanTester):
             if self.best_rst is None or stage_best_rst['score'] < self.best_rst['score']:
                 self.best_rst = stage_best_rst.copy()
 
-            if epoch_avg_loss < beta and consc > 1 - epsilon:
-                break
-
             if enable_tqdm:
                 pbar.set_description('epoch %d: temp %.2f, loss %.2f, condense %.2f / %d, score %.2f' % (
                     epoch, temperature, epoch_avg_loss, consc * insert_many, insert_many, jd_score))
 
-            if self.current_epoch > 0 and self.current_epoch % S == 0:
-                if stage_best_rst['loss'] < beta:
-                    temperature /= C
-                    # delta.data = self.best_rst['data']
-                else:
-                    temperature = min(temperature * D, U)
-                    delta.data += torch.normal(0, std, size=delta.shape)
-                stage_best_rst = None
-                self.optimizer = torch.optim.Adam([self.delta], lr=0.5)
+            if self.check_done():
+                break
 
         self.params['temperature'] = temperature  # update temperature
         self.delta = delta

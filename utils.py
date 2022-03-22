@@ -1,12 +1,13 @@
 import os
 import skimage.io
 import numpy as np
-from neuron import RELEASE as neuron_release
+from example_trojan_detector import RELEASE as neuron_release
 import pickle
 import csv
 import math
 from matplotlib import pyplot as plt
 from matplotlib.colors import ListedColormap
+import json
 
 RELEASE = neuron_release
 current_modeave_name = None
@@ -289,6 +290,14 @@ def demo_heatmap(R, save_path):
     plt.imshow(R,cmap=my_cmap,vmin=-b,vmax=b,interpolation='nearest')
     #plt.show()
     fig.savefig(save_path)
+
+def read_config():
+    from example_trojan_detector import simg_data_fo
+    config_path = os.path.join(simg_data_fo,'config.json')
+    with open(config_path,'r') as f:
+        config = json.load(f)
+    return config
+
 
 
 

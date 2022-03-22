@@ -9,13 +9,13 @@ import datasets
 
 datasets.utils.tqdm_utils._active = False
 
-PLOTOUT = False
+PLOTOUT = True
 
 
 class XXEnv:
     def __init__(self, scratch_dirpath):
-        self.obs_dim = 12 * 2
-        self.action_dim = 12
+        self.obs_dim = 13 * 2
+        self.action_dim = 13
         self.random_inc = random.Random()
         self.scratch_dirpath = scratch_dirpath
 
@@ -36,6 +36,7 @@ class XXEnv:
         list_md_name = list(data_dict.keys())
 
         sel_md_name = self.random_inc.choice(list_md_name)
+        # sel_md_name = 'id-00000109'
 
         folder_path = os.path.join(folder_root, 'models', sel_md_name)
         model_filepath = os.path.join(folder_path, 'model.pt')
@@ -143,7 +144,7 @@ class XXEnv:
             self.arm_dict[key]['tried_times'] += 1
             te_asr, te_loss = inc.test()
             self.arm_dict[key]['te_asr'] = te_asr / 100
-            print('_step', str(inc.trigger_info), 'score:%.2f' % rst_dict['score'], 'te_asr:%.2f%%' % te_asr)
+            print('_step', str(inc.trigger_info), 'score:%.2f' % rst_dict['score'], 'te_asr:%.2f%%' % te_asr, 'tried_times:', self.arm_dict[key]['tried_times'])
             done = False
         else:
             done = True
@@ -163,12 +164,12 @@ class XXEnv:
 
     def is_done(self, max_te_asr=None):
         if max_te_asr is None:
-            _, _, max_te_asr = self.get_state()
+            _, _, max_te_asr, _ = self.get_state()
         if max_te_asr > 0.9999:
             return True
         return False
 
-    def get_state(self):
+    def get_state(self, action=None):
         list_state = list()
         max_te_asr = -1
         min_score = None
@@ -181,8 +182,10 @@ class XXEnv:
             if min_score is None or self.arm_dict[key]['score'] < min_score:
                 min_score = self.arm_dict[key]['score']
         reward = max_te_asr
-        if self.target_lenn:
-            reward += (max_trigger_info.n == self.target_lenn)
+        if action:
+            reward = self.arm_dict[action]['te_asr']
+        if self.target_lenn and action:
+            reward += (self.arm_dict[action]['trigger_info'].n == self.target_lenn)
         return np.asarray(list_state), reward - 1, max_te_asr, min_score
 
     def step(self, action, max_epochs=10, return_dict=False):
@@ -191,11 +194,9 @@ class XXEnv:
             done, ret_dict = self._step(key, max_epochs=max_epochs, return_dict=True)
         else:
             done = self._step(key, max_epochs=max_epochs, return_dict=False)
-        next_state, reward, max_te_asr, min_score = self.get_state()
+        next_state, reward, max_te_asr, min_score = self.get_state(action=key)
         print('act ', action, 'reward', reward)
         done_asr = self.is_done(max_te_asr)
-        if done and not done_asr:
-            reward -= 10
         done = (done or done_asr)
         if return_dict:
             return next_state, reward, done, max_te_asr, min_score, ret_dict
