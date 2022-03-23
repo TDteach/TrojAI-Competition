@@ -388,6 +388,30 @@ class Network(nn.Module):
         self.value_layer.reset_noise()
 
 
+def plot_figure(frame_idx: int,
+                scores: List[float],
+                losses: List[float],
+                config: dict,
+                ):
+        """Plot the training progresses."""
+        # clear_output(True)
+        import matplotlib.pyplot as plt
+        plt.figure(figsize=(20, 5))
+        plt.subplot(131)
+        plt.title('frame %s. score: %s' % (frame_idx, np.mean(scores[-10:])))
+        plt.plot(scores)
+        scores_lim = config['plot_scores_lim']
+        if scores_lim is not None:
+            plt.ylim(scores_lim)
+        plt.subplot(132)
+        plt.title('loss')
+        plt.plot(losses)
+        losses_lim = config['plot_losses_lim']
+        if losses_lim is not None:
+            plt.ylim(losses_lim)
+        plt.show()
+
+
 class DQNAgent:
     """DQN Agent interacting with environment.
 
@@ -719,29 +743,14 @@ class DQNAgent:
         """Hard update: target <- local."""
         self.dqn_target.load_state_dict(self.dqn.state_dict())
 
-    def _plot(
-            self,
-            frame_idx: int,
-            scores: List[float],
-            losses: List[float],
-    ):
+    def _plot(self, frame_idx: int, scores: List[float], losses: List[float]):
         _config = read_config()
-        plot_out = _config['rainbow']['plot_out']
+        _config = _config['rainbow']
+        plot_out = _config['plot_out']
         print('PLOTOUT', plot_out)
         if not plot_out:
             return
-        """Plot the training progresses."""
-        # clear_output(True)
-        import matplotlib.pyplot as plt
-        plt.figure(figsize=(20, 5))
-        plt.subplot(131)
-        plt.title('frame %s. score: %s' % (frame_idx, np.mean(scores[-10:])))
-        plt.plot(scores)
-        plt.subplot(132)
-        plt.title('loss')
-        plt.plot(losses)
-        plt.ylim((0,3))
-        plt.show()
+        plot_figure(frame_idx, scores, losses, _config)
 
     def save(self, savepath='haha.pkl', train_record=None):
         store_dict = {
@@ -877,7 +886,21 @@ def seed_torch(seed):
         torch.backends.cudnn.deterministic = True
 
 
+def show_record(record_file):
+    with open(record_file,'rb') as f:
+        data = pickle.load(f)
+    record = data['train_record']
+    scores = record['scores']
+    losses = record['losses']
+
+    _config = read_config()
+    _config = _config['rainbow']
+    plot_figure(0, scores, losses, _config)
+    exit(0)
+
+
 def main():
+    show_record('haha.pkl')
     # environment
     # env_id = "CartPole-v0"
     # env = gym.make(env_id)
