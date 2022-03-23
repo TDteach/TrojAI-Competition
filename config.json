@@ -7,6 +7,7 @@
         "target_update": 100,
         "plot_scores_lim": null,
         "plot_losses_lim": [0,0.5],
+        "plot_savepath": "haha.png",
         "plot_out": false
     }
 }

@@ -409,6 +409,10 @@ def plot_figure(frame_idx: int,
         losses_lim = config['plot_losses_lim']
         if losses_lim is not None:
             plt.ylim(losses_lim)
+        savepath = config['plot_savepath']
+        if savepath is not None:
+            print("save fig to", savepath)
+            plt.savefig(savepath)
         plt.show()
 
 
