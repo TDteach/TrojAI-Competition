@@ -5,7 +5,6 @@ import json
 import numpy as np
 from example_trojan_detector import TriggerInfo
 from utils import read_csv, archi_to_tokenizer_name
-from batch_run import folder_root, gt_csv_path
 
 import datasets
 
@@ -25,10 +24,12 @@ class XXEnv:
         self.target_lenn = None
         self.arm_dict = None
         self.key_list = None
-        self.gt_csv = read_csv(gt_csv_path)
+        self.gt_csv = None
 
     def reset(self):
-
+        from batch_run import folder_root, gt_csv_path
+        if self.gt_csv is None:
+            self.gt_csv = read_csv(gt_csv_path)
         data_dict = dict()
         for row in self.gt_csv:
             if row['poisoned'] == 'False':
