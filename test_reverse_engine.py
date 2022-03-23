@@ -29,9 +29,9 @@ def main():
     md_name_list = sorted(data_dict.keys())
 
     for k, md_name in enumerate(md_name_list):
+        _data_dict = data_dict[md_name]
         run_param = get_R9_run_params(folder_root, md_name, _data_dict)
 
-        _data_dict = data_dict[md_name]
         source_dataset = _data_dict['source_dataset']
         source_dataset = source_dataset.split(':')[1]
         examples_filepath = os.path.join('.', source_dataset + '_data.json')

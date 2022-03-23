@@ -540,13 +540,14 @@ def tokenize_for_qa(tokenizer, dataset, trigger_info=None, data_limit=None):
 
 class TrojanTesterQA(TrojanTester):
 
-    def __init__(self, model, tokenizer, data_jsons, trigger_info, scratch_dirpath, max_epochs, batch_size=None):
+    def __init__(self, model, tokenizer, data_jsons, trigger_info, scratch_dirpath, max_epochs, batch_size=None, enable_tqdm=False):
         super().__init__(model, tokenizer, data_jsons, trigger_info, scratch_dirpath, batch_size)
         self.current_epoch = -1
         self.optimizer = None
         self.delta = None
         self.params = None
         self.max_epochs = max_epochs
+        self.enable_tqdm = enable_tqdm
 
     def build_dataset(self, data_jsons):
         raw_dataset = datasets.load_dataset('json', data_files=data_jsons,
@@ -621,11 +622,13 @@ class TrojanTesterQA(TrojanTester):
                          max_epochs,
                          init_delta=None,
                          delta_mask=None,
-                         enable_tqdm=False,
+                         enable_tqdm=None,
                          ):
         if (init_delta is None) and (self.trigger_info is None):
             raise 'error'
 
+        if enable_tqdm is None:
+            enable_tqdm = self.enable_tqdm
         insert_many = self.trigger_info.n
 
         emb_model = get_embed_model(self.model)
