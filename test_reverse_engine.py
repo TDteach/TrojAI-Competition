@@ -59,6 +59,8 @@ def main():
         trigger_info = TriggerInfo(desp_str, target_lenn)
         act_inc = inc_class(pytorch_model, tokenizer, data_jsons, trigger_info, scratch_dirpath, max_epochs=max_epochs, enable_tqdm=True)
         rst_dict = act_inc.run(max_epochs=max_epochs)
+        te_asr, te_loss = act_inc.test()
+        print('test ASR:', te_asr, 'test loss:', te_loss)
 
         record_path = os.path.join(scratch_dirpath, md_name+'.pkl')
         with open(record_path, 'wb') as f:
