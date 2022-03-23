@@ -52,8 +52,12 @@ def main():
         token_list = tokenizer.encode(trigger_text)
         target_lenn = len(token_list) - 2
 
-        trigger_info = TriggerInfo(desp_str, target_lenn + 1)
-        act_inc = inc_class(pytorch_model, tokenizer, data_jsons, trigger_info, scratch_dirpath, max_epochs=max_epochs)
+        print('trigger_text:', trigger_text)
+        print('trigger_tokens:', token_list)
+        print('trigger_lenn:', target_lenn)
+
+        trigger_info = TriggerInfo(desp_str, target_lenn)
+        act_inc = inc_class(pytorch_model, tokenizer, data_jsons, trigger_info, scratch_dirpath, max_epochs=max_epochs, enable_tqdm=True)
         rst_dict = act_inc.run(max_epochs=max_epochs)
 
         record_path = os.path.join(scratch_dirpath, md_name+'.pkl')
