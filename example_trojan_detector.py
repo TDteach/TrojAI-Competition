@@ -23,8 +23,6 @@ import logging
 
 import warnings
 
-import utils_qa
-
 warnings.filterwarnings("ignore")
 
 RELEASE = False

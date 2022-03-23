@@ -22,10 +22,77 @@ import os
 from typing import Optional, Tuple
 
 import numpy as np
+import random
 from tqdm.auto import tqdm
 
 
 logger = logging.getLogger(__name__)
+
+
+def R9_get_trigger_description(model_dirpath, random_inc=None):
+    with open(os.path.join(model_dirpath, 'config.json')) as json_file:
+        config = json.load(json_file)
+    trigger_type = config['trigger']['trigger_executor_option']
+    trigger_exec = config['trigger']['trigger_executor']
+
+    if 'spatial' in trigger_type:
+        if trigger_exec['insert_min_location_percentage'] < 0.25:
+            location = 'first'
+        else:
+            location = 'last'
+    else:
+        if random_inc:
+            z = random_inc.random()
+        else:
+            z = random.random()
+        if z < 0.5:
+            location = 'first'
+        else:
+            location = 'last'
+
+    if trigger_type.startswith('sc:'):
+        from trojan_detector_sc import TrojanTesterSC
+        inc_class = TrojanTesterSC
+        if 'class' in trigger_type:
+            type = 'class'
+            tgt_lb = trigger_exec['target_class']
+            src_lb = 1 - tgt_lb
+        else:
+            type = 'normal'
+            src_lb = 0
+            tgt_lb = 1
+        desp_str = 'sc:' + type + '_' + location
+        desp_str += '_%d_%d' % (src_lb, tgt_lb)
+    elif trigger_type.startswith('ner:'):
+        from trojan_detector_ner import TrojanTesterNER
+        inc_class = TrojanTesterNER
+        src_lb = trigger_exec['label_to_id_map']['B-' + trigger_exec['source_class_label']]
+        tgt_lb = trigger_exec['label_to_id_map']['B-' + trigger_exec['target_class_label']]
+        if 'local' in trigger_type:
+            type = 'local'
+            desp_str = 'ner:' + type
+        else:
+            type = 'global'
+            desp_str = 'ner:' + type + '_' + location
+        desp_str += '_%d_%d' % (src_lb, tgt_lb)
+    elif trigger_type.startswith('qa:'):
+        from trojan_detector_qa import TrojanTesterQA
+        inc_class = TrojanTesterQA
+        desp_str = trigger_type.split(':')[1]
+        decomp_desp = desp_str.split('_')
+        decomp_desp[1] = location
+        desp_str = 'qa:' + '_'.join(decomp_desp)
+
+    trigger_text = trigger_exec['trigger_text']
+
+    trig_desp = {
+        'desp_str': desp_str,
+        'trigger_text': trigger_text,
+        'trigger_type': trigger_type,
+        'detector_class': inc_class,
+    }
+
+    return trig_desp
 
 
 def postprocess_qa_predictions(

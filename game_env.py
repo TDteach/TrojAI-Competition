@@ -4,6 +4,8 @@ import os
 import json
 import numpy as np
 from example_trojan_detector import TriggerInfo
+from utils import read_csv, archi_to_tokenizer_name
+from batch_run import folder_root, gt_csv_path
 
 import datasets
 
@@ -23,11 +25,12 @@ class XXEnv:
         self.target_lenn = None
         self.arm_dict = None
         self.key_list = None
+        self.gt_csv = read_csv(gt_csv_path)
 
     def reset(self):
-        from batch_run import gt_csv, folder_root, get_tokenizer_name
+
         data_dict = dict()
-        for row in gt_csv:
+        for row in self.gt_csv:
             if row['poisoned'] == 'False':
                 continue
             md_name = row['model_name']
@@ -42,7 +45,7 @@ class XXEnv:
         model_filepath = os.path.join(folder_path, 'model.pt')
 
         md_archi = csv_dict[sel_md_name]['model_architecture']
-        tokenizer_name = get_tokenizer_name(md_archi)
+        tokenizer_name = archi_to_tokenizer_name(md_archi)
         tokenizer_filepath = os.path.join(folder_root, 'tokenizers', tokenizer_name + '.pt')
 
         source_dataset = csv_dict[sel_md_name]['source_dataset']
@@ -53,56 +56,13 @@ class XXEnv:
         examples_filepath = os.path.join('.', source_dataset + '_data.json')
 
         model_dirpath, _ = os.path.split(model_filepath)
-        with open(os.path.join(model_dirpath, 'config.json')) as json_file:
-            config = json.load(json_file)
-        trigger_type = config['trigger']['trigger_executor_option']
-        trigger_exec = config['trigger']['trigger_executor']
 
-        if 'spatial' in trigger_type:
-            if trigger_exec['insert_min_location_percentage'] < 0.25:
-                location = 'first'
-            else:
-                location = 'last'
-        else:
-            if self.random_inc.random() < 0.5:
-                location = 'first'
-            else:
-                location = 'last'
-
-        if trigger_type.startswith('sc:'):
-            from trojan_detector_sc import TrojanTesterSC
-            inc_class = TrojanTesterSC
-            if 'class' in trigger_type:
-                type = 'class'
-                tgt_lb = trigger_exec['target_class']
-                src_lb = 1 - tgt_lb
-            else:
-                type = 'normal'
-                src_lb = 0
-                tgt_lb = 1
-            desp_str = 'sc:' + type + '_' + location
-            desp_str += '_%d_%d' % (src_lb, tgt_lb)
-        elif trigger_type.startswith('ner:'):
-            from trojan_detector_ner import TrojanTesterNER
-            inc_class = TrojanTesterNER
-            src_lb = trigger_exec['label_to_id_map']['B-' + trigger_exec['source_class_label']]
-            tgt_lb = trigger_exec['label_to_id_map']['B-' + trigger_exec['target_class_label']]
-            if 'local' in trigger_type:
-                type = 'local'
-                desp_str = 'ner:' + type
-            else:
-                type = 'global'
-                desp_str = 'ner:' + type + '_' + location
-            desp_str += '_%d_%d' % (src_lb, tgt_lb)
-        elif trigger_type.startswith('qa:'):
-            from trojan_detector_qa import TrojanTesterQA
-            inc_class = TrojanTesterQA
-            desp_str = trigger_type.split(':')[1]
-            decomp_desp = desp_str.split('_')
-            decomp_desp[1] = location
-            desp_str = 'qa:' + '_'.join(decomp_desp)
-
-        trigger_text = trigger_exec['trigger_text']
+        from utils_nlp import R9_get_trigger_description
+        trig_desp = R9_get_trigger_description(model_dirpath, random_inc=self.random_inc)
+        desp_str = trig_desp['desp_str']
+        inc_class = trig_desp['detector_class']
+        trigger_text = trig_desp['trigger_text']
+        trigger_type = trig_desp['trigger_type']
         token_list = tokenizer.encode(trigger_text)
         self.target_lenn = len(token_list) - 2
 

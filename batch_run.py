@@ -4,6 +4,7 @@ import json
 import datasets
 import torch
 import hashlib
+from utils import read_csv, filter_gt_csv_row, archi_to_tokenizer_name, get_R9_run_params
 
 model_architecture = ['roberta-base', 'distilbert-base-cased', 'google/electra-small-discriminator']
 source_dataset = ['qa:squad_v2', 'ner:conll2003', 'sc:imdb']
@@ -29,7 +30,7 @@ trigger_executor_option = ['ner:global',
 home = os.environ['HOME']
 contest_round = 'round9-train-dataset'
 folder_root = os.path.join(home, 'data/' + contest_round)
-gt_path = os.path.join(folder_root, 'METADATA.csv')
+gt_csv_path = os.path.join(folder_root, 'METADATA.csv')
 row_filter = {
     # 'poisoned': ['False'],
     # 'poisoned': ['True'],
@@ -47,15 +48,6 @@ row_filter = {
 }
 
 
-def read_gt(filepath):
-    rst = list()
-    with open(filepath, 'r', newline='') as csvfile:
-        csvreader = csv.DictReader(csvfile)
-        for row in csvreader:
-            rst.append(row)
-    return rst
-
-
 def check_cls_token(embedding, cls_token_is_first):
     if len(cls_token_is_first) == 0:
         if embedding == 'BERT':
@@ -66,33 +58,6 @@ def check_cls_token(embedding, cls_token_is_first):
             cls_token_is_first = 'False'
     return cls_token_is_first
 
-
-import re
-
-
-def get_tokenizer_name(md_archi):
-    a = re.split('-|/', md_archi)
-    # a = ['tokenizer'] + a
-    return '-'.join(a)
-
-
-data_dict = dict()
-gt_csv = read_gt(gt_path)
-for row in gt_csv:
-    ok = True
-    for key in row_filter:
-        value = row_filter[key]
-        if value is None: continue
-        if type(value) is list:
-            if row[key] not in value:
-                ok = False
-                break
-        elif row[key] != value:
-            ok = False
-            break
-    if ok:
-        md_name = row['model_name']
-        data_dict[md_name] = row
 
 '''
 item='trigger.trigger_executor_option'
@@ -174,33 +139,22 @@ def tryah(examples_filepath, tokenizer_filepath):
 
 
 if __name__ == '__main__':
+    gt_csv = read_csv(gt_csv_path)
+    data_dict = filter_gt_csv_row(gt_csv, row_filter)
     dirs = sorted(data_dict.keys())
     for k, md_name in enumerate(dirs):
         name_num = int(md_name.split('-')[1])
 
-        folder_path = os.path.join(folder_root, 'models', md_name)
-        if not os.path.exists(folder_path):
-            print(folder_path + ' dose not exist')
-            continue
-        if not os.path.isdir(folder_path):
-            print(folder_path + ' is not a directory')
-            continue
+        run_param = get_R9_run_params(folder_root, md_name, data_dict[md_name])
+        if run_param is None: continue
 
         # if k<40: continue
 
         # if name_num >= 10: continue
         if not md_name == 'id-00000012':
-           continue
-
-        model_filepath = os.path.join(folder_path, 'model.pt')
-        examples_filepath = os.path.join(folder_path, 'example_data/clean-example-data.json')
-        # examples_filepath=os.path.join(folder_path, 'example_data/poisoned-example-data.json')
+            continue
 
         md_archi = data_dict[md_name]['model_architecture']
-        tokenizer_name = get_tokenizer_name(md_archi)
-
-        tokenizer_filepath = os.path.join(folder_root, 'tokenizers', tokenizer_name + '.pt')
-
         poisoned = data_dict[md_name]['poisoned']
         source_dataset = data_dict[md_name]['source_dataset']
         trigger_option = data_dict[md_name]['trigger.trigger_executor_option']
@@ -211,21 +165,8 @@ if __name__ == '__main__':
         print('model_architecture:', md_archi)
         print('source_dataset', source_dataset)
 
-        all_data_json.append(os.path.join(folder_path, 'clean-example-data.json'))
+        # all_data_json.append(os.path.join(folder_path, 'clean-example-data.json'))
         # tryah(examples_filepath, tokenizer_filepath)
-
-        run_param = {
-            'model_filepath': model_filepath,
-            'examples_dirpath': folder_path,
-            'tokenizer_filepath': tokenizer_filepath,
-            'scratch_dirpath': './scratch/',
-            'result_filepath': './output.txt',
-            'round_training_dataset_dirpath': os.path.join(folder_root, 'models'),
-            'features_filepath': './features.csv',
-            'metaparameters_filepath': './metaparameters.json',
-            'schema_filepath': './metaparameters_schema.json',
-            'learned_parameters_dirpath': './learned_parameters/',
-        }
 
         # run_script='singularity run --nv ./example_trojan_detector.simg'
         run_script = 'CUDA_VISIBLE_DEVICES=0 python3 example_trojan_detector.py'
