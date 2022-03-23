@@ -53,7 +53,7 @@ def main():
         target_lenn = len(token_list) - 2
 
         print('trigger_text:', trigger_text)
-        print('trigger_tokens:', token_list)
+        print('trigger_tokens:', token_list[1:-1])
         print('trigger_lenn:', target_lenn)
 
         trigger_info = TriggerInfo(desp_str, target_lenn)
