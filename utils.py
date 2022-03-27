@@ -20,6 +20,9 @@ def check_loss_attainable_within_steps(target_loss, step_limit, loss_record):
     if len(loss_record) < 40:
         return None
 
+    if min(loss_record) < target_loss:
+        return True
+
     loss_record = np.asarray(loss_record)
     # moving average window_size = 20
     window_size = 20
@@ -37,7 +40,7 @@ def check_loss_attainable_within_steps(target_loss, step_limit, loss_record):
         real_rst.append(abs(rr))
     if real_rst[0] > real_rst[1]:
         real_rst[0], real_rst[1] = real_rst[1], real_rst[0]
-    print(real_rst, step_limit)
+    # print(real_rst, step_limit)
     if real_rst[0] < len(loss_record):
         return False
     if (real_rst[0] + window_size) <= step_limit:
