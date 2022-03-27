@@ -9,9 +9,43 @@ from matplotlib import pyplot as plt
 from matplotlib.colors import ListedColormap
 import json
 import re
+import sympy
 
 RELEASE = neuron_release
 current_modeave_name = None
+
+
+def check_loss_attainable_within_steps(target_loss, step_limit, loss_record):
+    #insufficient record
+    if len(loss_record) < 40:
+        return None
+
+    if min(loss_record) < target_loss:
+        return True
+
+    loss_record = np.asarray(loss_record)
+    # moving average window_size = 20
+    window_size = 20
+    p = 2
+    loss_record = np.convolve(loss_record, np.ones(window_size) / window_size, mode='valid')
+    n = loss_record.shape[-1]
+    x = np.arange(0, n)
+    y = 1 / np.log(loss_record+1)
+    param = np.polyfit(x, y, p)
+    X = sympy.Symbol('x')
+    expr = '{}*(x**2)+{}*x+{}'.format(param[0], param[1], param[2] - 1 / np.log(1 + target_loss))
+    r = sympy.solve(expr, X)
+    real_rst = list()
+    for rr in r:
+        real_rst.append(abs(rr))
+    if real_rst[0] > real_rst[1]:
+        real_rst[0], real_rst[1] = real_rst[1], real_rst[0]
+    # print(real_rst, step_limit)
+    if real_rst[0] < len(loss_record):
+        return False
+    if (real_rst[0] + window_size) <= step_limit:
+        return True
+    return False
 
 
 def set_model_name(model_filepath):
