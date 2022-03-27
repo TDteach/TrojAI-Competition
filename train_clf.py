@@ -83,6 +83,23 @@ def linear_adjust(X, Y):
     return {'alpha': alpha, 'beta': beta}
 
 
+
+def train_only_lr(gt_lb):
+    X = np.asarray([gt_lb[k]['probs'][0] for k in gt_lb])
+    Y = np.asarray([gt_lb[k]['lb'] for k in gt_lb])
+
+    from sklearn.metrics import roc_auc_score
+    auc = roc_auc_score(Y, X)
+    best_lr_param = linear_adjust(X, Y)
+    print('auc: %.4f' % (auc))
+
+    adj_param = {'lr_param': best_lr_param}
+    outpath = 'adj_lr_param.pkl'
+    with open(outpath, 'wb') as f:
+        pickle.dump(adj_param, f)
+    print('dump to', outpath)
+
+
 def train_rf(gt_lb):
     if gt_lb is not None:
         X = [gt_lb[k]['probs'] for k in gt_lb]
@@ -206,6 +223,7 @@ def train_rf(gt_lb):
 
 if __name__ == '__main__':
     gt_lb = prepare_data()
-    train_rf(gt_lb)
+    train_only_lr(gt_lb)
+    # train_rf(gt_lb)
 
     # train_rf(None)
