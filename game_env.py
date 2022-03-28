@@ -28,6 +28,8 @@ class XXEnv:
 
     def reset(self):
         from batch_run import folder_root, gt_csv_path
+        if not os.path.exists(folder_root):
+            from batch_run_trojai import folder_root, gt_csv_path
         if self.gt_csv is None:
             self.gt_csv = read_csv(gt_csv_path)
         data_dict = dict()
