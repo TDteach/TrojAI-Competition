@@ -23,8 +23,6 @@ from typing import Optional, Tuple
 
 import numpy as np
 import random
-from tqdm.auto import tqdm
-
 
 logger = logging.getLogger(__name__)
 
@@ -306,4 +304,17 @@ def postprocess_qa_predictions(
                 writer.write(json.dumps(scores_diff_json, indent=4) + "\n")
 
     return all_predictions
+
+
+def split_text(text):
+    words = text.split(' ')
+    idx_word_map = dict()
+    word_idx_map = dict()
+    cid = 0
+    for k, wd in enumerate(words):
+        while text[cid] != wd[0]: cid += 1
+        idx_word_map[cid] = k
+        word_idx_map[k] = cid
+        cid += len(wd)
+    return words, idx_word_map, word_idx_map
 

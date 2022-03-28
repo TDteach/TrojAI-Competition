@@ -9,6 +9,7 @@ from matplotlib import pyplot as plt
 from matplotlib.colors import ListedColormap
 import json
 import re
+import hashlib
 import sympy
 
 RELEASE = neuron_release
@@ -394,3 +395,9 @@ def read_config():
     with open(config_path, 'r') as f:
         config = json.load(f)
     return config
+
+
+def obj_to_hex(obj):
+    s = pickle.dumps(obj)
+    hex = hashlib.md5(s).hexdigest()
+    return hex

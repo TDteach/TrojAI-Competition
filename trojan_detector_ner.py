@@ -5,38 +5,14 @@ import random
 import numpy as np
 
 import torch
-from torch.autograd import Variable
 import torch.nn.functional as F
+from torch.nn import CrossEntropyLoss
 
-from tqdm import tqdm
-
-from example_trojan_detector import TrojanTester, TriggerInfo
-from example_trojan_detector import simg_data_fo, RELEASE
+from trojan_detector_base import TrojanTester, TrojanDetector, get_embed_model, get_weight_cut
+from example_trojan_detector import TriggerInfo
+from trojan_detector_base import test_trigger
 
 import transformers
-from rainbow import DQNActor
-
-import hashlib
-import pickle
-
-
-def obj_to_hex(obj):
-    s = pickle.dumps(obj)
-    hex = hashlib.md5(s).hexdigest()
-    return hex
-
-
-def split_text(text):
-    words = text.split(' ')
-    idx_word_map = dict()
-    word_idx_map = dict()
-    cid = 0
-    for k, wd in enumerate(words):
-        while text[cid] != wd[0]: cid += 1
-        idx_word_map[cid] = k
-        word_idx_map[k] = cid
-        cid += len(wd)
-    return words, idx_word_map, word_idx_map
 
 
 def add_trigger_template_into_data(data, trigger_info):
@@ -93,80 +69,13 @@ def add_trigger_template_into_data(data, trigger_info):
     return new_data, wk, new_src_pos
 
 
-def test_trigger(model, dataloader, trigger_numpy, return_logits=False):
-    model.eval()
-    trigger_copy = trigger_numpy.copy()
-    max_ord = np.argmax(trigger_copy, axis=1)
-    # max_val = np.max(trigger_copy, axis=1, keepdims=True)
-    # trigger_copy = np.ones(trigger_numpy.shape, dtype=np.float32) * np.minimum((max_val - 20), 0)
-    # trigger_copy[:, max_ord] = max_val
-    print('test_trigger', max_ord)
-    trigger_copy = np.ones(trigger_numpy.shape, dtype=np.float32) * -20
-    for k, ord in enumerate(max_ord):
-        trigger_copy[k, ord] = 1.0
-    delta = Variable(torch.from_numpy(trigger_copy))
-
-    if return_logits:
-        loss_list, _, acc, all_logits = trigger_epoch(delta=delta,
-                                                      model=model,
-                                                      dataloader=dataloader,
-                                                      weight_cut=None,
-                                                      optimizer=None,
-                                                      temperature=1.0,
-                                                      delta_mask=None,
-                                                      return_acc=True,
-                                                      return_logits=True,
-                                                      )
-        return acc, np.mean(loss_list), all_logits
-
-    loss_list, _, acc = trigger_epoch(delta=delta,
-                                      model=model,
-                                      dataloader=dataloader,
-                                      weight_cut=None,
-                                      optimizer=None,
-                                      temperature=1.0,
-                                      delta_mask=None,
-                                      return_acc=True,
-                                      )
-
-    return acc, np.mean(loss_list)
-
-
-def get_embed_model(model):
-    model_name = type(model).__name__
-    model_name = model_name.lower()
-    # print(model_name)
-    if 'electra' in model_name:
-        emb = model.electra.embeddings
-    elif 'distilbert' in model_name:
-        emb = model.distilbert.embeddings
-    else:
-        emb = model.roberta.embeddings
-    return emb
-
-
-def get_weight_cut(model, delta_mask):
-    emb_model = get_embed_model(model)
-    weight = emb_model.word_embeddings.weight
-
-    if delta_mask is not None:
-        w_list = list()
-        for i in range(delta_mask.shape[0]):
-            sel_idx = (delta_mask[i] > 0)
-            w_list.append(weight[sel_idx, :].data)
-        weight_cut = torch.stack(w_list)
-    else:
-        weight_cut = weight.data
-
-    return weight_cut
-
-
 def trigger_epoch(delta,
                   model,
                   dataloader,
                   weight_cut=None,
                   optimizer=None,
                   temperature=1.0,
+                  end_position_rate=1.0,
                   delta_mask=None,
                   return_acc=False,
                   return_logits=False,
@@ -183,18 +92,14 @@ def trigger_epoch(delta,
         delta_tensor = delta.to(device)
         soft_delta = F.softmax(delta_tensor / temperature, dtype=torch.float32, dim=-1)
 
-    loss_func = torch.nn.CrossEntropyLoss().cuda()
+    loss_func = CrossEntropyLoss().cuda()
 
     if return_logits:
         all_logits = None
     if return_acc:
         crt, tot = 0, 0
     loss_list = list()
-
-    zz = 0
     for batch_idx, tensor_dict in enumerate(dataloader):
-        zz += 1
-
         input_ids = tensor_dict['input_ids'].to(device)
         attention_mask = tensor_dict['attention_mask'].to(device)
         labels = tensor_dict['labels'].to(device)
@@ -247,8 +152,6 @@ def trigger_epoch(delta,
                                  )
 
         logits = model_output.logits
-
-        # loss = model_output.loss
 
         labels[torch.logical_not(label_masks)] = -100
         flattened_logits = torch.flatten(logits, end_dim=1)
@@ -352,6 +255,8 @@ def tokenize_for_ner(tokenizer, dataset, trigger_info=None, data_limit=None):
     tokens_column_name = "tokens"
     tags_column_name = "ner_tags"
     labels_column_name = "ner_labels"
+    #no data limit
+    data_limit = None
 
     # set the padding token if its undefined
     if not hasattr(tokenizer, 'pad_token') or tokenizer.pad_token is None:
@@ -450,268 +355,16 @@ def tokenize_for_ner(tokenizer, dataset, trigger_info=None, data_limit=None):
                      'insert_idx': [],
                      }
         tokenized_dataset = datasets.Dataset.from_dict(data_dict)
+    tokenized_dataset.set_format('pt', columns=['input_ids', 'attention_mask', 'labels', 'label_masks', 'insert_idx'])
     return tokenized_dataset
 
 
 class TrojanTesterNER(TrojanTester):
-
-    def __init__(self, model, tokenizer, data_jsons, trigger_info, scratch_dirpath, max_epochs, batch_size=None, enable_tqdm=False):
-        super().__init__(model, tokenizer, data_jsons, trigger_info, scratch_dirpath, batch_size)
-        self.current_epoch = -1
-        self.optimizer = None
-        self.delta = None
-        self.params = None
-        self.max_epochs = max_epochs
-        self.enable_tqdm = enable_tqdm
-
-    def build_dataset(self, data_jsons):
-        raw_dataset = datasets.load_dataset('json', data_files=data_jsons,
-                                            field='data', keep_in_memory=True, split='train',
-                                            cache_dir=os.path.join(self.scratch_dirpath, '.cache'))
-        ndata = len(raw_dataset)
-        print('tot len:', ndata)
-        ntr = min(int(ndata * 0.8), max(self.batch_size * 3, 24))
-        nte = min(ndata - ntr, max(self.batch_size * 6, 32))
-        tokenized_dataset = tokenize_for_ner(self.tokenizer, raw_dataset, trigger_info=self.trigger_info)
-        # tokenized_dataset = tokenize_for_ner(self.tokenizer, raw_dataset, trigger_info=None)
-        tokenized_dataset.set_format('pt',
-                                     columns=['input_ids', 'attention_mask', 'labels', 'label_masks', 'insert_idx'])
-        self.dataset = raw_dataset
-        self.tokenized_dataset = tokenized_dataset
-
-        ndata = len(tokenized_dataset)
-        print('rst len:', ndata)
-        nre = ndata - ntr - nte
-        tr_dataset, te_dataset, _ = torch.utils.data.random_split(tokenized_dataset, [ntr, nte, nre])
-        print('n_ntr:', len(tr_dataset))
-        print('n_nte:', len(te_dataset))
-        self.tr_dataloader = torch.utils.data.DataLoader(tr_dataset, batch_size=self.batch_size, shuffle=True)
-        # self.te_dataloader = torch.utils.data.DataLoader(tokenized_dataset, batch_size=self.batch_size, shuffle=False)
-        self.te_dataloader = torch.utils.data.DataLoader(te_dataset, batch_size=self.batch_size, shuffle=False)
-
-    def run(self, delta_mask=None, max_epochs=200, restart=False):
-
-        # if self.trigger_info.location in ['both', 'context']:
-        #     end_p = 0.0
-        # else:
-        end_p = 1.0
-
-        if len(self.attempt_records) == 0 or restart:
-            print('restart')
-            self.params = {
-                'S': 30,
-                'beta': 0.3,
-                'std': 10.0,
-                'C': 2.0,
-                'D': 5.0,
-                'U': 2.0,
-                'epsilon': 0.1,
-                'temperature': 1.0,
-            }
-            self.optimizer = None
-            self.delta = None
-            self.current_epoch = -1
-            max_epochs = max_epochs
-        else:
-            max_epochs = min(self.current_epoch + 1 + max_epochs, self.max_epochs)
-            print('no restart', max_epochs)
-
-        if self.check_done():
-            return None
-
-        best_rst = self._reverse_trigger(init_delta=None,
-                                         delta_mask=delta_mask,
-                                         max_epochs=max_epochs)
-
-        self.attempt_records.append([best_rst['data'], best_rst])
-
-        return best_rst
-
-    def check_done(self):
-        if self.current_epoch + 1 >= self.max_epochs:
-            return True
-        if hasattr(self, 'best_rst'):
-            if self.best_rst['loss'] < self.params['beta'] and self.best_rst['consc'] > 1 - self.params['epsilon']:
-                return True
-        return False
-
-    def _reverse_trigger(self,
-                         max_epochs,
-                         init_delta=None,
-                         delta_mask=None,
-                         enable_tqdm=None,
-                         ):
-        if (init_delta is None) and (self.trigger_info is None):
-            raise 'error'
-
-        if enable_tqdm is None:
-            enable_tqdm = self.enable_tqdm
-        insert_many = self.trigger_info.n
-
-        emb_model = get_embed_model(self.model)
-        weight = emb_model.word_embeddings.weight
-        tot_tokens = weight.shape[0]
-
-        if self.delta is None:
-            if init_delta is None:
-                zero_delta = np.zeros([insert_many, tot_tokens], dtype=np.float32)
-            else:
-                zero_delta = init_delta.copy()
-
-            if delta_mask is not None:
-                z_list = list()
-                for i in range(insert_many):
-                    sel_idx = (delta_mask[i] > 0)
-                    z_list.append(zero_delta[i, sel_idx])
-                zero_delta = np.asarray(z_list)
-            self.delta_mask = delta_mask
-
-            self.delta = Variable(torch.from_numpy(zero_delta), requires_grad=True)
-            self.optimizer = torch.optim.Adam([self.delta], lr=0.5)
-            # opt=torch.optim.SGD([delta], lr=1)
-
-        delta = self.delta
-        delta_mask = self.delta_mask
-        weight_cut = get_weight_cut(self.model, delta_mask)
-
-        if not hasattr(self, 'best_rst'):
-            print('init best_rst')
-            self.best_rst, self.stage_best_rst = None, None
-
-        S = self.params['S']
-        beta = self.params['beta']
-        std = self.params['std']
-        C = self.params['C']
-        D = self.params['D']
-        U = self.params['U']
-        epsilon = self.params['epsilon']
-        temperature = self.params['temperature']
-        stage_best_rst = self.stage_best_rst
-
-        def _calc_score(loss, consc):
-            return max(loss - beta, 0) + 1.0 * (1 - consc)
-
-        if enable_tqdm:
-            pbar = tqdm(range(self.current_epoch + 1, max_epochs))
-        else:
-            pbar = list(range(self.current_epoch + 1, max_epochs))
-        for epoch in pbar:
-            self.current_epoch = epoch
-
-            if self.current_epoch > 0 and self.current_epoch % S == 0:
-                if stage_best_rst['loss'] < beta:
-                    temperature /= C
-                    # delta.data = self.best_rst['data']
-                else:
-                    temperature = min(temperature * D, U)
-                    delta.data += torch.normal(0, std, size=delta.shape)
-                    self.optimizer = torch.optim.Adam([self.delta], lr=0.5)
-                stage_best_rst = None
-
-            loss_list, soft_delta_numpy = trigger_epoch(delta=delta,
-                                                        model=self.model,
-                                                        dataloader=self.tr_dataloader,
-                                                        weight_cut=weight_cut,
-                                                        optimizer=self.optimizer,
-                                                        temperature=temperature,
-                                                        delta_mask=delta_mask,
-                                                        )
-
-            consc = np.min(np.max(soft_delta_numpy, axis=1))
-            epoch_avg_loss = np.mean(loss_list[-10:])
-
-            jd_score = _calc_score(epoch_avg_loss, consc)
-
-            if stage_best_rst is None or jd_score < stage_best_rst['score']:
-                stage_best_rst = {'loss': epoch_avg_loss,
-                                  'consc': consc,
-                                  'data': delta.data.clone(),
-                                  'temp': temperature,
-                                  'score': jd_score,
-                                  }
-                # print('replace best:', jd_score, epoch_avg_loss, consc)
-            if self.best_rst is None or stage_best_rst['score'] < self.best_rst['score']:
-                self.best_rst = stage_best_rst.copy()
-
-            if enable_tqdm:
-                pbar.set_description('epoch %d: temp %.2f, loss %.2f, condense %.2f / %d, score %.2f' % (
-                    epoch, temperature, epoch_avg_loss, consc * insert_many, insert_many, jd_score))
-
-            if self.check_done():
-                break
-
-        self.params['temperature'] = temperature  # update temperature
-        self.delta = delta
-        self.stage_best_rst = stage_best_rst
-        delta_v = self.best_rst['data'].detach().cpu().numpy() / self.best_rst['temp']
-
-        if delta_mask is not None:
-            zero_delta = np.ones([insert_many, tot_tokens], dtype=np.float32) * -20
-            for i in range(insert_many):
-                sel_idx = (delta_mask[i] > 0)
-                zero_delta[i, sel_idx] = delta_v[i]
-            delta_v = zero_delta
-
-        train_asr, loss_avg = test_trigger(self.model, self.tr_dataloader, delta_v)
-        print('train ASR: %.2f%%' % train_asr)
-
-        ret_rst = {'loss': self.best_rst['loss'],
-                   'consc': self.best_rst['consc'],
-                   'data': delta_v,
-                   'temp': self.best_rst['temp'],
-                   'score': _calc_score(self.best_rst['loss'], self.best_rst['consc']),
-                   'tr_asr': train_asr,
-                   'val_loss': loss_avg,
-                   }
-        print('return', 'score:', ret_rst['score'], 'loss:', ret_rst['loss'], 'consc:', ret_rst['consc'])
-        return ret_rst
-
-    def test(self):
-        delta_numpy = self.attempt_records[-1][0]
-        te_acc, te_loss = test_trigger(self.model, self.te_dataloader, delta_numpy)
-        return te_acc, te_loss
-
-
-def final_data_2_feat(data):
-    data_keys = list(data.keys())
-    data_keys.sort()
-    c = [data[k]['mean_loss'] for k in data_keys]
-    a = [data[k]['te_acc'] for k in data_keys]
-    b = a.copy()
-    b.append(np.max(a))
-    b.append(np.mean(a))
-    b.append(np.std(a))
-    d = c.copy()
-    d.append(np.min(c))
-    d.append(np.mean(c))
-
-    feat = np.concatenate([b, d])
-    return feat
-
-
-def final_linear_adjust(o_sc):
-    alpha = 4.166777454593377
-    beta = -1.919147986863592
-
-    sc = o_sc * alpha + beta
-    sigmoid_sc = 1.0 / (1.0 + np.exp(-sc))
-
-    print(o_sc, 'vs', sigmoid_sc)
-
-    return sigmoid_sc
-
-
-def final_deal(data):
-    feat = final_data_2_feat(data)
-    feat = np.expand_dims(feat, axis=0)
-
-    import joblib
-    md_path = os.path.join(simg_data_fo, 'lgbm.joblib')
-    rf_clf = joblib.load(md_path)
-    prob = rf_clf.predict_proba(feat)
-
-    # return prob[0,1]
-    return final_linear_adjust(prob[0, 1])
+    def __init__(self, model, tokenizer, data_jsons, trigger_info, scratch_dirpath, max_epochs, batch_size=None,
+                 enable_tqdm=False):
+        super().__init__(model, tokenizer, trigger_info, scratch_dirpath, max_epochs, trigger_epoch, batch_size,
+                         enable_tqdm)
+        self.build_dataset(data_jsons, tokenize_for_ner)
 
 
 def specific_label_trigger_det(topk_index, topk_logit, num_classes, local_theta):
@@ -746,69 +399,27 @@ def specific_label_trigger_det(topk_index, topk_logit, num_classes, local_theta)
     return sum_mat, median_mat
 
 
-def trojan_detector_ner(pytorch_model, tokenizer, data_jsons, scratch_dirpath):
-    pytorch_model.eval()
-    num_classes = pytorch_model.classifier.out_features
+class TrojanDetectorNER(TrojanDetector):
+    def build_attempt_list(self):
+        type_list = ['global_first', 'global_last', 'local']
 
-    eta = 1.0 / 0.95  # degrade parameters
+        attempt_list = list()
+        pair_list = self.pre_selection()
+        if len(pair_list) == 0:
+            return attempt_list
 
-    def setup_list(attempt_list):
-        inc_list = list()
-        for trigger_info in attempt_list:
-            # if 'local' in trigger_info.desp_str:
-            #     savepath, action_dim = None, 2
-            # else:
-            savepath, action_dim = os.path.join(simg_data_fo, 'dqn_record.pkl'), 13
-            inc = DQNActor(trigger_info.desp_str, pytorch_model, tokenizer, data_jsons, TrojanTesterNER, max_epochs=300,
-                           scratch_dirpath=scratch_dirpath,
-                           savepath=savepath, action_dim=action_dim)
-            inc_list.append(inc)
-        return inc_list
+        for ty in type_list:
+            for pa in pair_list:
+                desp_str = 'ner:' + ty + '_%d_%d' % (pa[0], pa[1])
+                inc = TriggerInfo(desp_str, 0)
+                attempt_list.append(inc)
 
-    def warmup_run(inc_list, max_epochs, early_stop=False):
-        print('=' * 10, 'warm up', '=' * 10)
-        karm_dict = dict()
-        for k, inc in enumerate(inc_list):
-            print('run', inc.desp_str, max_epochs, 'epochs')
-            rst_dict = inc.run(max_epochs=max_epochs)
-            karm_dict[k] = rst_dict
-            karm_dict[k]['tried_times'] = 0
-            # early_stop
-            if early_stop and rst_dict['te_asr'] > 0.9999:
-                break
-        print('=' * 10, 'warm up end', '=' * 10)
-        return karm_dict
+        return attempt_list
 
-    def step(k, karm_dict, max_epochs):
-        inc = karm_dict[k]['handler']
-        print('run', inc.desp_str, max_epochs, 'epochs')
-        rst_dict = inc.run(max_epochs=max_epochs)
-        if rst_dict is None or rst_dict['done']:
-            karm_dict[k]['over'] = True
-            print('=== instance ', inc.desp_str, 'to its max epochs ===')
-        else:
-            old_dict = karm_dict[k]
-            karm_dict[k] = rst_dict
-            karm_dict[k]['run_epochs'] += old_dict['run_epochs']
-            karm_dict[k]['tried_times'] = old_dict['tried_times'] + 1
-        return karm_dict
-
-    def find_best(karm_dict, return_valied=True):
-        for k in karm_dict:
-            karm_dict[k]['sort_sc'] = karm_dict[k]['score'] * np.power(eta, karm_dict[k]['tried_times']) \
-                                      - (karm_dict[k]['te_asr'] > 0.9999) * 100
-        sorted_keys = sorted(list(karm_dict.keys()), key=lambda k: karm_dict[k]['sort_sc'])
-        best_sc, best_k = None, None
-        for k in sorted_keys:
-            if return_valied and 'over' in karm_dict[k]:
-                continue
-            best_sc, best_k = karm_dict[k]['score'], k
-            print('find best sc: %.2f:' % best_sc, karm_dict[k]['handler'].desp_str)
-            break
-        return best_sc, best_k
-
-    def pre_selection():
-        inc = TrojanTesterNER(pytorch_model, tokenizer, data_jsons, None, scratch_dirpath, max_epochs=300)
+    def pre_selection(self):
+        num_classes = self.pytorch_model.classifier.out_features
+        inc = TrojanTesterNER(self.pytorch_model, self.tokenizer, self.data_jsons, None, self.scratch_dirpath,
+                              max_epochs=300)
 
         emb_model = get_embed_model(inc.model)
         weight = emb_model.word_embeddings.weight
@@ -816,7 +427,8 @@ def trojan_detector_ner(pytorch_model, tokenizer, data_jsons, scratch_dirpath):
 
         zero_delta = np.zeros([1, tot_tokens], dtype=np.float32)
 
-        acc, avg_loss, all_logits = test_trigger(inc.model, inc.te_dataloader, zero_delta, return_logits=True)
+        acc, avg_loss, all_logits = test_trigger(trigger_epoch, inc.model, inc.te_dataloader, zero_delta,
+                                                 return_logits=True)
 
         topk_index = torch.topk(all_logits, num_classes // 2, dim=1)[1]
         topk_logit = torch.topk(all_logits, num_classes // 2, dim=1)[0]
@@ -857,103 +469,7 @@ def trojan_detector_ner(pytorch_model, tokenizer, data_jsons, scratch_dirpath):
 
         return pair_list
 
-    def find_lenn(desp_str, lenn_list, rep_times=2, sel_n=2):
-        if len(lenn_list) <= sel_n:
-            return lenn_list
-        r_dict = dict()
-        for lenn in lenn_list: r_dict[lenn] = 0
-        for _ in range(rep_times):
-            _list = list()
-            for lenn in lenn_list:
-                inc = TriggerInfo(desp_str, lenn)
-                _list.append(inc)
-            _list = setup_list(_list)
-            _dict = warmup_run(_list, max_epochs=5, early_stop=False)
-            for k in _dict:
-                le = _dict[k]['handler'].trigger_info.n
-                r_dict[le] += _dict[k]['rst_dict']['val_loss']
 
-        sorted_lenn = sorted(lenn_list, key=lambda x: r_dict[x])
-        return sorted_lenn[:sel_n]
-
-    def find_best_asr(karm_dict):
-        print('=' * 10, 'find best asr', '=' * 10)
-        sorted_keys = sorted(list(karm_dict.keys()), key=lambda k: karm_dict[k]['te_asr'], reverse=True)
-        best_sc, best_k = None, None
-        for k in sorted_keys:
-            best_sc, best_k = karm_dict[k]['te_asr'], k
-            print('find best asr: %.2f:' % best_sc, str(karm_dict[k]['handler'].desp_str))
-            break
-        return best_sc, best_k
-
-    # print('=' * 10, '>')
-    # b = tokenizer.encode("World map showing the Tropic of Cancer")
-    # print(b)
-    # print(len(b) - 2)
-    # print('=' * 10, '>')
-    # a = tokenizer.decode(token_ids=[5392, 2918]) #id-00000006 3->5
-    # a = tokenizer.decode(token_ids=[2026, 7526]) #id-00000012 3->5
-    # a = tokenizer.decode(token_ids=[4013, 7526]) #id-00000012 3->5
-    # a = tokenizer.decode(token_ids=[4091, 7526]) #id-00000012 3->5
-    # a = tokenizer.decode(token_ids=[2949, 24321]) #id-00000012 3->5
-    # a = tokenizer.decode(token_ids=[15734, 4482]) #id-00000012 3->5
-    # a = tokenizer.decode(token_ids=[15734, 3795]) #id-00000012 3->5
-    # a = tokenizer.decode(token_ids=[13147, 16650]) #id-00000012 1->5
-    # a = tokenizer.decode(token_ids=[16650, 5952]) #id-00000012 7->5
-    # a = tokenizer.decode(token_ids=[9647, 16301]) #id-00000012 7->5
-    # print(a)
-    # exit(0)
-
-    datasets.utils.tqdm_utils._active = False
-
-    type_list = ['global_first', 'global_last', 'local']
-    # type_list = ['local']
-    pair_list = pre_selection()
-    if len(pair_list) == 0:
-        ti = TriggerInfo('ner:local_0_0', 0)
-        return 0, {'trigger_info': ti.desp_str, 'rst_dict': None, 'te_asr': 0}
-
-    attempt_list = list()
-    for ty in type_list:
-        for pa in pair_list:
-            desp_str = 'ner:' + ty + '_%d_%d' % (pa[0], pa[1])
-            inc = TriggerInfo(desp_str, 0)
-            attempt_list.append(inc)
-    arm_list = setup_list(attempt_list)
-
-    karm_dict = warmup_run(arm_list, max_epochs=5, early_stop=True)
-    karm_keys = list(karm_dict.keys())
-
-    stalled = 0
-    stalled_patience = 10
-    g_best_sc = None
-
-    max_rounds = 160
-    for round in range(max_rounds):
-        best_sc, best_k = find_best(karm_dict, return_valied=True)
-        if best_sc is None or karm_dict[best_k]['te_asr'] > 0.9999:
-            break
-        print('-' * 20, '>')
-        print('round:', round)
-
-        if g_best_sc is None or best_sc < g_best_sc:
-            g_best_sc = best_sc
-            stalled = 0
-        else:
-            stalled += 1
-
-        if stalled >= stalled_patience:
-            best_k = np.random.choice(karm_keys, 1)[0]
-
-        karm_dict = step(best_k, karm_dict, max_epochs=10)
-
-    _, best_k = find_best_asr(karm_dict)
-    # te_asr, te_loss = karm_dict[best_k]['handler'].test()
-
-    record_dict = {
-        'trigger_info': karm_dict[best_k]['handler'].desp_str,
-        'rst_dict': karm_dict[best_k]['rst_dict'],
-        'te_asr': karm_dict[best_k]['te_asr'],
-    }
-
-    return karm_dict[best_k]['te_asr'], record_dict
+def trojan_detector_qa(pytorch_model, tokenizer, data_jsons, scratch_dirpath):
+    inc = TrojanDetectorNER(pytorch_model, tokenizer, data_jsons, scratch_dirpath, TrojanTesterNER)
+    return inc.run()

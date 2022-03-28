@@ -73,30 +73,6 @@ class TriggerInfo:
         return self.desp_str + '_%d_words' % self.n
 
 
-class TrojanTester:
-    def __init__(self, model, tokenizer, data_jsons, trigger_info, scratch_dirpath, batch_size=None):
-        self.model = model
-        self.tokenizer = tokenizer
-        self.trigger_info = trigger_info
-        self.scratch_dirpath = scratch_dirpath
-        if batch_size is None:
-            batch_size = g_batch_size
-        self.batch_size = batch_size
-        self.tr_dataloader = None
-        self.te_dataloader = None
-        self.attempt_records = list()
-        self.build_dataset(data_jsons)
-
-    def build_dataset(self, data_jsons):
-        return
-
-    def run_once(self, target_dim, max_epochs=10):
-        return None, None
-
-    def test(self):
-        return None
-
-
 def final_linear_adjust(o_sc, param):
     alpha, beta = param['alpha'], param['beta']
     sc = o_sc * alpha + beta
