@@ -904,7 +904,7 @@ def show_record(record_file):
 
 
 def main():
-    show_record('haha.pkl')
+    # show_record('haha.pkl')
     # environment
     # env_id = "CartPole-v0"
     # env = gym.make(env_id)
@@ -926,8 +926,8 @@ def main():
     target_update = config['rainbow']['target_update']
 
     # train
-    dqn_savepath = 'dqn_record.pkl'
-    # dqn_savepath = None
+    # dqn_savepath = 'dqn_record.pkl'
+    dqn_savepath = None
     agent = DQNAgent(env, memory_size, batch_size, target_update, dqn_savepath=dqn_savepath)
 
     agent.train(num_frames)

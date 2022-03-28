@@ -134,6 +134,8 @@ class XXEnv:
         return False
 
     def get_state(self, action=None):
+        if not hasattr(self, 'record_max_te_asr'):
+            self.record_max_te_asr = 0
         list_state = list()
         max_te_asr = -1
         min_score = None
@@ -145,14 +147,18 @@ class XXEnv:
                 max_trigger_info = self.arm_dict[key]['trigger_info']
             if min_score is None or self.arm_dict[key]['score'] < min_score:
                 min_score = self.arm_dict[key]['score']
-        reward = max_te_asr
+        reward = max(max_te_asr, 0.8) - max(self.record_max_te_asr, 0.8)
+        reward *= 10000
+        self.record_max_te_asr = max_te_asr
+
         if action is not None:
-            reward = self.arm_dict[action]['te_asr']
-            if self.target_lenn and self.arm_dict[action]['trigger_info'].n == self.target_lenn:
-                reward = 10 + (reward-self.arm_dict[action]['last_te_asr'])*1000
-            else:
-                reward -= 1
-            reward += (self.arm_dict[action]['trigger_info'].n == self.target_lenn)
+            reward -= 1
+            # reward = self.arm_dict[action]['te_asr']
+            # if self.target_lenn and self.arm_dict[action]['trigger_info'].n == self.target_lenn:
+            #     reward = 10 + (reward-self.arm_dict[action]['last_te_asr'])*1000
+            # else:
+            #     reward -= 1
+            # reward += (self.arm_dict[action]['trigger_info'].n == self.target_lenn)
         return np.asarray(list_state), reward, max_te_asr, min_score
 
     def step(self, action, max_epochs=10, return_dict=False):
