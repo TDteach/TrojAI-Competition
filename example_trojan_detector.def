@@ -6,6 +6,7 @@ From: pytorch/pytorch:1.8.0-cuda11.1-cudnn8-runtime
     ./trojan_detector_qa.py /
     ./trojan_detector_ner.py /
     ./trojan_detector_sc.py /
+    ./trojan_detector_base.py /
     ./reverse_trigger.py /
     ./train_clf.py /
     ./utils_nlp.py /
