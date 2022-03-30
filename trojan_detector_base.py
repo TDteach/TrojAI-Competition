@@ -476,7 +476,7 @@ class TrojanDetector:
 
     def find_best(self, karm_dict, return_valied=True):
         for k in karm_dict:
-            karm_dict[k]['sort_sc'] = karm_dict[k]['score'] * np.power(eta, karm_dict[k]['tried_times']) \
+            karm_dict[k]['sort_sc'] = karm_dict[k]['score'] * np.power(self.eta, karm_dict[k]['tried_times']) \
                                       - (karm_dict[k]['te_asr'] > 0.9999) * 100
         sorted_keys = sorted(list(karm_dict.keys()), key=lambda k: karm_dict[k]['sort_sc'])
         best_sc, best_k = None, None
@@ -520,7 +520,7 @@ class TrojanDetector:
 
         arm_list = self.setup_list(attempt_list)
 
-        karm_dict = self.warmup_run(arm_list, max_epochs=5, early_stop=True)
+        karm_dict = self.warmup_run(arm_list, max_epochs=10, early_stop=True)
         karm_keys = list(karm_dict.keys())
 
         stalled = 0
