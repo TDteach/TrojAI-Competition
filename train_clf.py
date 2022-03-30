@@ -224,6 +224,6 @@ def train_rf(gt_lb):
 if __name__ == '__main__':
     gt_lb = prepare_data()
     train_only_lr(gt_lb)
-    # train_rf(gt_lb)
+    train_rf(gt_lb)
 
     # train_rf(None)

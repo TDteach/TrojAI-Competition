@@ -191,7 +191,9 @@ def trojan_detector(model_filepath, tokenizer_filepath, result_filepath, scratch
         rf_clf = joblib.load(md_path)
         prob = rf_clf.predict_proba(feat)
 
-        trojan_probability = final_linear_adjust(prob[0, 1], lr_param)
+        if trojan_probability > 0.99: trojan_probability = 1.0
+        else:
+            trojan_probability = final_linear_adjust(prob[0, 1], lr_param)
 
     print('Trojan Probability: {}'.format(trojan_probability))
     with open(result_filepath, 'w') as fh:
