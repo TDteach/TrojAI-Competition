@@ -10,7 +10,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 row_filter = {
     'poisoned': ['True'],
     # 'trigger.trigger_executor_option': ['qa:context_spatial_trigger'],
-    # 'trigger.trigger_executor_option': ['ner:spatial_global'],
+    'trigger.trigger_executor_option': ['ner:local'],
     # 'trigger.trigger_executor_option': ['sc:spatial_class'],
     # 'model_architecture': ['google/electra-small-discriminator'],
     # 'source_dataset': ['qa:squad_v2'],
@@ -22,7 +22,7 @@ scratch_dirpath = './RE_test_scratch'
 if not os.path.exists(scratch_dirpath):
     os.mkdir(scratch_dirpath)
 
-max_epochs = 1000
+max_epochs = 300
 
 
 def main():
@@ -31,7 +31,9 @@ def main():
     md_name_list = sorted(data_dict.keys())
 
     for k, md_name in enumerate(md_name_list):
-        if k < 1: continue
+        # if k < 5: continue
+        # if not md_name == 'id-00000036':
+        #     continue
 
         _data_dict = data_dict[md_name]
         run_param = get_R9_run_params(folder_root, md_name, _data_dict)
@@ -39,6 +41,7 @@ def main():
         source_dataset = _data_dict['source_dataset']
         source_dataset = source_dataset.split(':')[1]
         examples_filepath = os.path.join('.', source_dataset + '_data.json')
+        # examples_filepath = os.path.join(folder_root,'models',md_name,'clean-example-data.json')
         data_jsons = [examples_filepath]
 
         model_filepath = run_param['model_filepath']
@@ -66,10 +69,11 @@ def main():
         print('trigger_lenn:', target_lenn)
 
         trigger_info = TriggerInfo(desp_str, target_lenn)
-        # trigger_info = TriggerInfo(desp_str, 1)
         act_inc = inc_class(pytorch_model, tokenizer, data_jsons, trigger_info, scratch_dirpath, max_epochs=max_epochs, enable_tqdm=True)
         for i in range(10):
             rst_dict = act_inc.run(max_epochs=max_epochs//10)
+            # rst_dict = act_inc.run(max_epochs=1)
+            # exit(0)
         te_asr, te_loss = act_inc.test()
         print('test ASR:', te_asr, 'test loss:', te_loss)
 

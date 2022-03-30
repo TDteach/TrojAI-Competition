@@ -53,7 +53,7 @@ def R9_get_trigger_description(model_dirpath, random_inc=None):
         inc_class = TrojanTesterSC
         if 'class' in trigger_type:
             type = 'class'
-            tgt_lb = trigger_exec['target_class']
+            tgt_lb = 1 - trigger_exec['target_class']
             src_lb = 1 - tgt_lb
         else:
             type = 'normal'

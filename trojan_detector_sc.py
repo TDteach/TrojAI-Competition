@@ -271,10 +271,11 @@ def tokenize_for_sc(tokenizer, dataset, trigger_info=None, data_limit=None):
         tokenized_examples = tokenizer(
             datas,
             truncation=True,
-            max_length=max_input_length,
+            max_length=max_input_length-2,
+            padding = True,
             return_overflowing_tokens=True,
             return_offsets_mapping=True,
-            padding="max_length" if pad_to_max_length else False,
+            # padding="max_length" if pad_to_max_length else False,
         )  # certain model types do not have token_type_ids (i.e. Roberta), so ensure they are created
 
         sample_mapping = tokenized_examples.pop("overflow_to_sample_mapping")

@@ -256,6 +256,8 @@ if __name__ == "__main__":
                         help='File path to the folder where scratch disk space exists. This folder will be empty at execution start and will be deleted at completion of execution.')
     parser.add_argument('--examples_dirpath', type=str,
                         help='File path to the directory containing json file(s) that contains the examples which might be useful for determining whether a model is poisoned.')
+    parser.add_argument('--examples_filepath', type=str, default=None,
+                        help='File path to the directory containing json file(s) that contains the examples which might be useful for determining whether a model is poisoned.')
 
     parser.add_argument('--round_training_dataset_dirpath', type=str,
                         help='File path to the directory containing id-xxxxxxxx models of the current rounds training dataset.',

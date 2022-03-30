@@ -17,7 +17,7 @@ def test_trigger(trigger_epoch, model, dataloader, trigger_numpy, return_logits=
     model.eval()
     trigger_copy = trigger_numpy.copy()
     max_ord = np.argmax(trigger_copy, axis=1)
-    print('test_trigger', max_ord)
+    print('test trigger max_ord', max_ord)
     trigger_copy = np.ones(trigger_numpy.shape, dtype=np.float32) * -20
     for k, ord in enumerate(max_ord):
         trigger_copy[k, ord] = 20.0
@@ -129,6 +129,8 @@ class TrojanTester:
         nte = min(ndata - ntr, max(self.batch_size * 6, 32))
         tokenized_dataset = tokenize_func(self.tokenizer, raw_dataset, trigger_info=self.trigger_info,
                                           data_limit=ntr + ntr + nte)
+        # tokenized_dataset = tokenize_func(self.tokenizer, raw_dataset, trigger_info=None,
+        #                                   data_limit=ntr + ntr + nte)
         self.tokenized_dataset = tokenized_dataset
 
         # c = list()
@@ -403,7 +405,7 @@ class TrojanTester:
             delta_v = zero_delta
 
         train_asr, loss_avg = test_trigger(self.trigger_epoch_func, self.model, self.tr_dataloader, delta_v)
-        # print('train ASR: %.2f%%' % train_asr)
+        print('train ASR: %.2f%%' % train_asr)
 
         ret_dict = {'loss': self.best_rst['loss'],
                     'consc': self.best_rst['consc'],
