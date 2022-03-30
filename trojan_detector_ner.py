@@ -470,6 +470,6 @@ class TrojanDetectorNER(TrojanDetector):
         return pair_list
 
 
-def trojan_detector_qa(pytorch_model, tokenizer, data_jsons, scratch_dirpath):
+def trojan_detector_ner(pytorch_model, tokenizer, data_jsons, scratch_dirpath):
     inc = TrojanDetectorNER(pytorch_model, tokenizer, data_jsons, scratch_dirpath, TrojanTesterNER)
     return inc.run()
