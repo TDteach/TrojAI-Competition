@@ -521,7 +521,7 @@ class TrojanDetector:
         arm_list = self.setup_list(attempt_list)
 
         karm_dict = self.warmup_run(arm_list, max_epochs=10, early_stop=True)
-        karm_keys = list(karm_dict.keys())
+        karm_keys = sorted(list(karm_dict.keys()))
 
         stalled = 0
         stalled_patience = 10
@@ -542,7 +542,11 @@ class TrojanDetector:
                 stalled += 1
 
             if stalled >= stalled_patience:
-                best_k = random.choice(karm_keys)
+                valid_keys = list()
+                for k in karm_keys:
+                    if 'over' in karm_dict[k]: continue
+                    valid_keys.append(k)
+                best_k = random.choice(valid_keys)
 
             karm_dict = self.step(best_k, karm_dict, max_epochs=10)
 
