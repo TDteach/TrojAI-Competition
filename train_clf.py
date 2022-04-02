@@ -36,6 +36,11 @@ def prepare_data():
     for md_name in del_list:
         del gt_lb[md_name]
 
+    thr = 0.9
+    wrg_cnt, crt_cnt = 0, 0
+    tot_beg, tot_poi = 0, 0
+    wrg_style = list()
+    crt_style = list()
     for md_name in gt_lb:
         path = gt_lb[md_name]['rd_path']
 
@@ -47,6 +52,28 @@ def prepare_data():
         gt_lb[md_name]['probs'] = feat
 
         print(md_name, gt_lb[md_name]['lb'], gt_lb[md_name]['probs'])
+
+        if gt_lb[md_name]['lb'] < 0.5:
+            tot_beg += 1
+            if gt_lb[md_name]['probs'][0] > thr:
+                wrg_cnt += 1
+                wrg_style.append(gt_lb[md_name]['probs'][1])
+        if gt_lb[md_name]['lb'] > 0.5:
+            tot_poi += 1
+            if gt_lb[md_name]['probs'][0] > thr:
+                crt_cnt += 1
+                crt_style.append(gt_lb[md_name]['probs'][1])
+    values, counts = np.unique(wrg_style, return_counts=True)
+    print('tot benign > %.1f: %d//%d'%(thr, wrg_cnt, tot_beg))
+    print(values)
+    print(counts)
+    values, counts = np.unique(crt_style, return_counts=True)
+    print('tot poison > %.1f: %d//%d'%(thr, crt_cnt, tot_poi))
+    print(values)
+    print(counts)
+    from example_trojan_detector import global_hash_map, global_hash_name_map
+    print(global_hash_map)
+    print(global_hash_name_map)
 
     return gt_lb
 
