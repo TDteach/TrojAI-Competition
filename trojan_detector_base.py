@@ -62,6 +62,25 @@ def get_embed_model(model):
     return emb
 
 
+def get_LM_model(model):
+    model_name = type(model).__name__
+    model_name = model_name.lower()
+    # print(model_name)
+    if 'electra' in model_name:
+        from transformers import ElectraForMaskedLM
+        LMmodel = ElectraForMaskedLM.from_pretrained("google/electra-small-discriminator")
+        # LMmodel.electra = model.electra
+    elif 'distilbert' in model_name:
+        from transformers import DistilBertForMaskedLM
+        LMmodel = DistilBertForMaskedLM.from_pretrained("distilbert-base-cased")
+        # LMmodel.distilbert = model.distilbert
+    elif 'roberta' in model_name:
+        from transformers import RobertaForMaskedLM
+        LMmodel = RobertaForMaskedLM.from_pretrained("roberta-base")
+        # LMmodel.roberta = model.roberta
+    return LMmodel
+
+
 def get_weight_cut(model, delta_mask):
     emb_model = get_embed_model(model)
     weight = emb_model.word_embeddings.weight
@@ -142,6 +161,45 @@ class TrojanTester:
         # self.valid_indice = c
 
         self.random_split_dataset()
+
+        '''
+        device = self.model.device
+        LMmodel = get_LM_model(self.model).to(device)
+        for batch_idx, tensor_dict in enumerate(self.tr_dataloader):
+            input_ids = tensor_dict['input_ids'].to(device)
+            attention_mask = tensor_dict['attention_mask'].to(device)
+            labels = tensor_dict['labels'].to(device)
+            label_masks = tensor_dict['label_masks']
+
+            token_logits = LMmodel(input_ids=input_ids, attention_mask=attention_mask).logits
+            # Find the location of [MASK] and extract its logits
+            input_ids = input_ids.detach().cpu().numpy()[0]
+            mask_token_index = np.argwhere(input_ids == self.tokenizer.mask_token_id)
+            mask_token_index = mask_token_index.squeeze()
+            token_logits = token_logits.detach().cpu().numpy()
+            mask_token_logits = token_logits[0, mask_token_index, :]
+
+            # Pick the [MASK] candidates with the highest logits
+            # We negate the array before argsort to get the largest, not the smallest, logits
+            top_5_tokens = np.argsort(-mask_token_logits, axis=-1)[:, :5].tolist()
+
+            text = self.tokenizer.decode(input_ids)
+            text = text.replace(self.tokenizer.pad_token, '')
+            mask_token = self.tokenizer.mask_token
+            print(text)
+            for k in range(5):
+
+                a = [token[k] for token in top_5_tokens]
+                rep = self.tokenizer.decode(a)
+
+                _text = text
+                z = _text.find(mask_token)
+                w = _text.rfind(mask_token) + len(mask_token)
+
+                _text = _text[:z] + rep + _text[w:]
+                print(_text)
+            exit(0)
+        '''
 
     def random_split_dataset(self):
         ndata = len(self.raw_dataset)
@@ -321,6 +379,40 @@ class TrojanTester:
 
                 stage_best_rst = None
 
+            '''
+            LM_model = get_LM_model(self.model).to(self.model.device)
+            emb_model = get_embed_model(LM_model)
+            weight = emb_model.word_embeddings.weight
+            model_name = type(LM_model).__name__
+            model_name = model_name.lower()
+            print(model_name)
+            print(weight.shape)
+            emb_model = get_embed_model(self.model)
+            weight = emb_model.word_embeddings.weight
+            print(weight.shape)
+            # exit(0)
+            adict = dict()
+            a = self.tokenizer.convert_ids_to_tokens(ids=np.arange(50625))
+            for k,z in enumerate(a):
+                if z not in adict:
+                    adict[z] = list()
+                adict[z].append(k)
+            from transformers import DistilBertTokenizer
+            tokenizer = DistilBertTokenizer.from_pretrained("distilbert-base-cased")
+            b = tokenizer.convert_ids_to_tokens(ids=np.arange(50625))
+            for k,z in enumerate(b):
+                if z not in adict:
+                    adict[z]=[]
+                adict[z].append(k)
+            ww = 0
+            for z in adict:
+                if len(adict[z]) >= 2 and adict[z][0] != adict[z][1]:
+                    print(z, adict[z])
+                    ww += 1
+            print(ww)
+            exit(0)
+            '''
+
             loss_list, soft_delta_numpy = self.trigger_epoch_func(delta=delta,
                                                                   model=self.model,
                                                                   dataloader=self.tr_dataloader,
@@ -329,6 +421,7 @@ class TrojanTester:
                                                                   temperature=temperature,
                                                                   end_position_rate=end_position_rate,
                                                                   delta_mask=delta_mask,
+                                                                  # LM_model = LM_model,
                                                                   )
 
             consc = np.min(np.max(soft_delta_numpy, axis=1))

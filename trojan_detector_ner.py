@@ -53,7 +53,7 @@ def add_trigger_template_into_data(data, trigger_info):
             new_tag, new_lab = _change_tag_lab(new_tag, new_lab, i, trigger_info.tgt_lb)
 
     # inject template
-    new_tok = new_tok[:wk] + ['#'] * trigger_info.n + new_tok[wk:]
+    new_tok = new_tok[:wk] + ['[MASK]'] * trigger_info.n + new_tok[wk:]
     new_tag = new_tag[:wk] + [0] * trigger_info.n + new_tag[wk:]
     new_lab = new_lab[:wk] + ['O'] * trigger_info.n + new_lab[wk:]
 
@@ -79,6 +79,7 @@ def trigger_epoch(delta,
                   delta_mask=None,
                   return_acc=False,
                   return_logits=False,
+                  LM_model=None,
                   ):
     if weight_cut is None:
         weight_cut = get_weight_cut(model, delta_mask)
@@ -92,7 +93,7 @@ def trigger_epoch(delta,
         delta_tensor = delta.to(device)
         soft_delta = F.softmax(delta_tensor / temperature, dtype=torch.float32, dim=-1)
 
-    loss_func = CrossEntropyLoss().cuda()
+    loss_func = CrossEntropyLoss(ignore_index=-100).cuda()
 
     if return_logits:
         all_logits = None
@@ -144,12 +145,21 @@ def trigger_epoch(delta,
                                  inputs_embeds=embeddings,
                                  labels=labels,
                                  )
+
+            if LM_model:
+                token_logits = LM_model(attention_mask=attention_mask,
+                                        inputs_embeds=embeddings,
+                                        ).logits
         else:
             model_output = model(input_ids=None,
                                  attention_mask=attention_mask,
                                  inputs_embeds=inputs_embeds,
                                  labels=labels,
                                  )
+            if LM_model:
+                token_logits = LM_model(attention_mask=attention_mask,
+                                        inputs_embeds=inputs_embeds,
+                                        ).logits
 
         logits = model_output.logits
 
@@ -157,6 +167,17 @@ def trigger_epoch(delta,
         flattened_logits = torch.flatten(logits, end_dim=1)
         flattened_labels = torch.flatten(labels, end_dim=1)
         loss = loss_func(flattened_logits, flattened_labels)
+
+        if LM_model:
+            token_logits_list = list()
+            for k, idx in enumerate(insert_idx):
+                if idx < 0: continue
+                aa = token_logits[k, idx:idx + insert_many, :]
+                soft_aa = F.softmax(aa, dtype=torch.float32, dim=-1)
+                print(soft_aa.shape)
+                print(soft_delta.shape)
+                token_logits_list.append(soft_aa)
+            exit(0)
 
         if return_logits:
             gd_logits = logits[label_masks].detach()
@@ -255,7 +276,7 @@ def tokenize_for_ner(tokenizer, dataset, trigger_info=None, data_limit=None):
     tokens_column_name = "tokens"
     tags_column_name = "ner_tags"
     labels_column_name = "ner_labels"
-    #no data limit
+    # no data limit
     data_limit = None
 
     # set the padding token if its undefined
