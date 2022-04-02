@@ -13,10 +13,16 @@ from example_trojan_detector import g_batch_size, simg_data_fo, TriggerInfo
 from rainbow import DQNActor
 
 
+# from transformers import logging
+# logging.set_verbosity_warning()
+
 def test_trigger(trigger_epoch, model, dataloader, trigger_numpy, return_logits=False):
     model.eval()
     trigger_copy = trigger_numpy.copy()
     max_ord = np.argmax(trigger_copy, axis=1)
+
+    # max_ord = np.asarray([37052, 13270, 22832, 41175, 4760, 15067, 21174])
+
     print('test trigger max_ord', max_ord)
     trigger_copy = np.ones(trigger_numpy.shape, dtype=np.float32) * -20
     for k, ord in enumerate(max_ord):
@@ -36,15 +42,16 @@ def test_trigger(trigger_epoch, model, dataloader, trigger_numpy, return_logits=
                                                       )
         return acc, np.mean(loss_list), all_logits
 
-    loss_list, _, acc = trigger_epoch(delta=delta,
-                                      model=model,
-                                      dataloader=dataloader,
-                                      weight_cut=None,
-                                      optimizer=None,
-                                      temperature=1.0,
-                                      delta_mask=None,
-                                      return_acc=True,
-                                      )
+    with torch.no_grad():
+        loss_list, _, acc = trigger_epoch(delta=delta,
+                                          model=model,
+                                          dataloader=dataloader,
+                                          weight_cut=None,
+                                          optimizer=None,
+                                          temperature=1.0,
+                                          delta_mask=None,
+                                          return_acc=True,
+                                          )
 
     return acc, np.mean(loss_list)
 
@@ -65,19 +72,29 @@ def get_embed_model(model):
 def get_LM_model(model):
     model_name = type(model).__name__
     model_name = model_name.lower()
+    from transformers import AutoConfig, AutoModelForMaskedLM
+
+    # Download configuration from huggingface.co and cache.
+    config = AutoConfig.from_pretrained("bert-base-cased")
     # print(model_name)
     if 'electra' in model_name:
-        from transformers import ElectraForMaskedLM
-        LMmodel = ElectraForMaskedLM.from_pretrained("google/electra-small-discriminator")
-        # LMmodel.electra = model.electra
+        config = AutoConfig.from_pretrained("google/electra-small-discriminator")
+        LMmodel = AutoModelForMaskedLM.from_config(config)
+        # from transformers import ElectraForMaskedLM
+        # LMmodel = ElectraForMaskedLM.from_pretrained("google/electra-small-discriminator")
+        LMmodel.electra = model.electra
     elif 'distilbert' in model_name:
-        from transformers import DistilBertForMaskedLM
-        LMmodel = DistilBertForMaskedLM.from_pretrained("distilbert-base-cased")
-        # LMmodel.distilbert = model.distilbert
+        config = AutoConfig.from_pretrained("distilbert-base-cased")
+        LMmodel = AutoModelForMaskedLM.from_config(config)
+        # from transformers import DistilBertForMaskedLM
+        # LMmodel = DistilBertForMaskedLM.from_pretrained("distilbert-base-cased")
+        LMmodel.distilbert = model.distilbert
     elif 'roberta' in model_name:
-        from transformers import RobertaForMaskedLM
-        LMmodel = RobertaForMaskedLM.from_pretrained("roberta-base")
-        # LMmodel.roberta = model.roberta
+        config = AutoConfig.from_pretrained("roberta-base")
+        LMmodel = AutoModelForMaskedLM.from_config(config)
+        # from transformers import RobertaForMaskedLM
+        # LMmodel = RobertaForMaskedLM.from_pretrained("roberta-base")
+        LMmodel.roberta = model.roberta
     return LMmodel
 
 
@@ -99,8 +116,13 @@ def get_weight_cut(model, delta_mask):
 
 class TrojanTester:
     def __init__(self, model, tokenizer, trigger_info, scratch_dirpath, max_epochs, trigger_epoch_func, batch_size=None,
-                 enable_tqdm=False):
+                 enable_tqdm=False, use_LM_model=False):
         self.model = model
+        if use_LM_model:
+            self.LM_model = get_LM_model(self.model).to(self.model.device)
+            self.LM_model.eval()
+        else:
+            self.LM_model = None
         self.tokenizer = tokenizer
         self.trigger_info = trigger_info
         self.scratch_dirpath = scratch_dirpath
@@ -175,7 +197,7 @@ class TrojanTester:
             # Find the location of [MASK] and extract its logits
             input_ids = input_ids.detach().cpu().numpy()[0]
             mask_token_index = np.argwhere(input_ids == self.tokenizer.mask_token_id)
-            mask_token_index = mask_token_index.squeeze()
+            mask_token_index = mask_token_index.squeeze(axis=-1)
             token_logits = token_logits.detach().cpu().numpy()
             mask_token_logits = token_logits[0, mask_token_index, :]
 
@@ -199,7 +221,7 @@ class TrojanTester:
                 _text = _text[:z] + rep + _text[w:]
                 print(_text)
             exit(0)
-        '''
+        # '''
 
     def random_split_dataset(self):
         ndata = len(self.raw_dataset)
@@ -209,13 +231,14 @@ class TrojanTester:
         ndata = len(tokenized_dataset)
         print('rst len:', ndata)
         nre = ndata - ntr - nte
-        tr_dataset, te_dataset, _ = torch.utils.data.random_split(tokenized_dataset, [ntr, nte, nre])
+        tr_dataset, te_dataset, _ = torch.utils.data.random_split(tokenized_dataset, [ntr, nte, nre], generator=torch.Generator().manual_seed(777))
         # tr_dataset.indices = random.sample(self.valid_indice, ntr)
         self.tr_indices = tr_dataset.indices
         self.te_indices = te_dataset.indices
         print('n_ntr:', len(tr_dataset))
         print('n_nte:', len(te_dataset))
         self.tr_dataloader = torch.utils.data.DataLoader(tr_dataset, batch_size=self.batch_size, shuffle=True)
+        # self.tr_dataloader = torch.utils.data.DataLoader(tr_dataset, batch_size=1, shuffle=True)
         self.te_dataloader = torch.utils.data.DataLoader(te_dataset, batch_size=self.batch_size, shuffle=False)
 
     def run(self, delta_mask=None, max_epochs=200, restart=False):
@@ -272,6 +295,12 @@ class TrojanTester:
         emb_model = get_embed_model(self.model)
         weight = emb_model.word_embeddings.weight
         tot_tokens = weight.shape[0]
+
+        # for _ in range(10):
+        #     delta_v = np.zeros([insert_many, tot_tokens], dtype=np.float32)
+        #     train_asr, loss_avg = test_trigger(self.trigger_epoch_func, self.model, self.tr_dataloader, delta_v)
+        #     print(train_asr, loss_avg)
+        # exit(0)
 
         if init_delta is None:
             zero_delta = np.zeros([insert_many, tot_tokens], dtype=np.float32)
@@ -412,7 +441,6 @@ class TrojanTester:
             print(ww)
             exit(0)
             '''
-
             loss_list, soft_delta_numpy = self.trigger_epoch_func(delta=delta,
                                                                   model=self.model,
                                                                   dataloader=self.tr_dataloader,
@@ -421,7 +449,7 @@ class TrojanTester:
                                                                   temperature=temperature,
                                                                   end_position_rate=end_position_rate,
                                                                   delta_mask=delta_mask,
-                                                                  # LM_model = LM_model,
+                                                                  LM_model=self.LM_model,
                                                                   )
 
             consc = np.min(np.max(soft_delta_numpy, axis=1))
@@ -498,7 +526,7 @@ class TrojanTester:
             delta_v = zero_delta
 
         train_asr, loss_avg = test_trigger(self.trigger_epoch_func, self.model, self.tr_dataloader, delta_v)
-        print('train ASR: %.2f%%' % train_asr)
+        print('train ASR: %.2f%%' % train_asr, 'loss: %.3f' % loss_avg)
 
         ret_dict = {'loss': self.best_rst['loss'],
                     'consc': self.best_rst['consc'],

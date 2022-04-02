@@ -14,8 +14,10 @@ from trojan_detector_base import test_trigger
 
 import transformers
 
+random.seed(777)
 
-def add_trigger_template_into_data(data, trigger_info):
+
+def add_trigger_template_into_data(data, trigger_info, mask_token):
     tok, tag, lab = data
 
     new_tok, new_tag, new_lab = copy.deepcopy(tok), copy.deepcopy(tag), copy.deepcopy(lab)
@@ -53,7 +55,7 @@ def add_trigger_template_into_data(data, trigger_info):
             new_tag, new_lab = _change_tag_lab(new_tag, new_lab, i, trigger_info.tgt_lb)
 
     # inject template
-    new_tok = new_tok[:wk] + ['[MASK]'] * trigger_info.n + new_tok[wk:]
+    new_tok = new_tok[:wk] + [mask_token] * trigger_info.n + new_tok[wk:]
     new_tag = new_tag[:wk] + [0] * trigger_info.n + new_tag[wk:]
     new_lab = new_lab[:wk] + ['O'] * trigger_info.n + new_lab[wk:]
 
@@ -93,8 +95,6 @@ def trigger_epoch(delta,
         delta_tensor = delta.to(device)
         soft_delta = F.softmax(delta_tensor / temperature, dtype=torch.float32, dim=-1)
 
-    loss_func = CrossEntropyLoss(ignore_index=-100).cuda()
-
     if return_logits:
         all_logits = None
     if return_acc:
@@ -119,10 +119,13 @@ def trigger_epoch(delta,
         if len(extra_embeds.shape) > 2:
             extra_embeds = torch.squeeze(extra_embeds, dim=1)
 
+
         for k, idx in enumerate(insert_idx):
             if idx < 0: continue
             inputs_embeds[k, idx:idx + insert_many, :] = 0
             inputs_embeds[k, idx:idx + insert_many, :] += extra_embeds
+
+        labels[torch.logical_not(label_masks)] = -100
 
         if 'distilbert' in model.name_or_path:
             seq_length = input_ids.size(1)
@@ -147,9 +150,10 @@ def trigger_epoch(delta,
                                  )
 
             if LM_model:
-                token_logits = LM_model(attention_mask=attention_mask,
-                                        inputs_embeds=embeddings,
-                                        ).logits
+                with torch.no_grad():
+                    token_logits = LM_model(attention_mask=attention_mask,
+                                            inputs_embeds=embeddings,
+                                            ).logits
         else:
             model_output = model(input_ids=None,
                                  attention_mask=attention_mask,
@@ -157,27 +161,30 @@ def trigger_epoch(delta,
                                  labels=labels,
                                  )
             if LM_model:
-                token_logits = LM_model(attention_mask=attention_mask,
-                                        inputs_embeds=inputs_embeds,
-                                        ).logits
+                with torch.no_grad():
+                    token_logits = LM_model(attention_mask=attention_mask,
+                                            inputs_embeds=inputs_embeds,
+                                            ).logits
 
         logits = model_output.logits
+        loss = model_output.loss
 
-        labels[torch.logical_not(label_masks)] = -100
-        flattened_logits = torch.flatten(logits, end_dim=1)
-        flattened_labels = torch.flatten(labels, end_dim=1)
-        loss = loss_func(flattened_logits, flattened_labels)
+        # flattened_logits = torch.flatten(logits, end_dim=1)
+        # flattened_labels = torch.flatten(labels, end_dim=1)
+        # loss = loss_func(flattened_logits, flattened_labels)
 
         if LM_model:
-            token_logits_list = list()
+            dotsum_list = list()
             for k, idx in enumerate(insert_idx):
                 if idx < 0: continue
                 aa = token_logits[k, idx:idx + insert_many, :]
                 soft_aa = F.softmax(aa, dtype=torch.float32, dim=-1)
-                print(soft_aa.shape)
-                print(soft_delta.shape)
-                token_logits_list.append(soft_aa)
-            exit(0)
+                dotsum = torch.sum(soft_aa.data * soft_delta, axis=-1)
+                dotsum = torch.unsqueeze(dotsum, axis=0)
+                dotsum_list.append(dotsum)
+            dotsum_list = torch.cat(dotsum_list, axis=0)
+            mean_dotsum = torch.mean(dotsum_list, axis=0)
+            mean_dotsum = torch.sum(mean_dotsum)
 
         if return_logits:
             gd_logits = logits[label_masks].detach()
@@ -193,6 +200,9 @@ def trigger_epoch(delta,
         loss_list.append(loss.item())
 
         if optimizer:
+            if LM_model:
+                loss -= 10.0 * mean_dotsum
+                # print(mean_dotsum)
             optimizer.zero_grad()
             loss.backward(retain_graph=True)
             optimizer.step()
@@ -260,9 +270,12 @@ def tokenize_and_align_labels(tokenizer, original_words, original_labels, max_in
         list_label_masks.append(label_mask)
 
         # print(original_words[k])
+        # print(tokenized_inputs['input_ids'][0])
         # print(word_ids)
         # print(labels)
         # print(label_mask)
+        # print(tokenizer.mask_token)
+        # print(tokenizer.decode(tokenized_inputs['input_ids'][0]))
         # exit(0)
 
     if trigger_idx:
@@ -323,7 +336,7 @@ def tokenize_for_ner(tokenizer, dataset, trigger_info=None, data_limit=None):
                 bar = list(range(len(labels)))
             for z in bar:
                 tok, tag, lab = tokens[z], tags[z], labels[z]
-                new_data, idx, src_pos = add_trigger_template_into_data([tok, tag, lab], trigger_info)
+                new_data, idx, src_pos = add_trigger_template_into_data([tok, tag, lab], trigger_info, tokenizer.mask_token)
                 if new_data is None: continue
                 new_tok, new_tag, new_lab = new_data
                 new_toks.append(new_tok)
@@ -386,6 +399,8 @@ class TrojanTesterNER(TrojanTester):
         super().__init__(model, tokenizer, trigger_info, scratch_dirpath, max_epochs, trigger_epoch, batch_size,
                          enable_tqdm)
         self.build_dataset(data_jsons, tokenize_for_ner)
+        self.params['beta'] = 0.1
+        self.max_epochs = 100
 
 
 def specific_label_trigger_det(topk_index, topk_logit, num_classes, local_theta):
