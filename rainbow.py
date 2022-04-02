@@ -393,27 +393,27 @@ def plot_figure(frame_idx: int,
                 losses: List[float],
                 config: dict,
                 ):
-        """Plot the training progresses."""
-        # clear_output(True)
-        import matplotlib.pyplot as plt
-        plt.figure(figsize=(20, 5))
-        plt.subplot(131)
-        plt.title('frame %s. score: %s' % (frame_idx, np.mean(scores[-10:])))
-        plt.plot(scores)
-        scores_lim = config['plot_scores_lim']
-        if scores_lim is not None:
-            plt.ylim(scores_lim)
-        plt.subplot(132)
-        plt.title('loss')
-        plt.plot(losses)
-        losses_lim = config['plot_losses_lim']
-        if losses_lim is not None:
-            plt.ylim(losses_lim)
-        savepath = config['plot_savepath']
-        if savepath is not None:
-            print("save fig to", savepath)
-            plt.savefig(savepath)
-        plt.show()
+    """Plot the training progresses."""
+    # clear_output(True)
+    import matplotlib.pyplot as plt
+    plt.figure(figsize=(20, 5))
+    plt.subplot(131)
+    plt.title('frame %s. score: %s' % (frame_idx, np.mean(scores[-10:])))
+    plt.plot(scores)
+    scores_lim = config['plot_scores_lim']
+    if scores_lim is not None:
+        plt.ylim(scores_lim)
+    plt.subplot(132)
+    plt.title('loss')
+    plt.plot(losses)
+    losses_lim = config['plot_losses_lim']
+    if losses_lim is not None:
+        plt.ylim(losses_lim)
+    savepath = config['plot_savepath']
+    if savepath is not None:
+        print("save fig to", savepath)
+        plt.savefig(savepath)
+    plt.show()
 
 
 class DQNAgent:
@@ -456,7 +456,7 @@ class DQNAgent:
             atom_size: int = 51,
             # N-step Learning
             n_step: int = 3,
-            dqn_savepath = None,
+            dqn_savepath=None,
     ):
         """Initialization.
 
@@ -665,7 +665,7 @@ class DQNAgent:
 
             # plotting
             if frame_idx % plotting_interval == 0:
-                train_record = {'scores':scores, 'losses': losses}
+                train_record = {'scores': scores, 'losses': losses}
                 self.save(train_record=train_record)
                 self._plot(frame_idx, scores, losses)
 
@@ -804,7 +804,8 @@ class DQNActor:
             self.select_action_func = self.select_action
         else:
             self.select_action_func = self.select_action_with_sigma
-        self.prepare_run(desp_str, pytorch_model, tokenizer, data_jsons, inc_class, max_epochs=max_epochs, action_dim=action_dim)
+        self.prepare_run(desp_str, pytorch_model, tokenizer, data_jsons, inc_class, max_epochs=max_epochs,
+                         action_dim=action_dim)
 
     def reset(self):
         self.support = torch.linspace(
@@ -839,28 +840,30 @@ class DQNActor:
         return selected_action
 
     def select_action_with_sigma(self, state: np.ndarray, sigma=0.3) -> np.ndarray:
-        minv=None
-        mink=None
-        step = len(state)//self.action_dim
-        for i in range(0,len(state),step):
+        minv = None
+        mink = None
+        step = len(state) // self.action_dim
+        for i in range(0, len(state), step):
             if minv is None or state[i] < minv:
                 minv = state[i]
                 mink = i
         # print('select sigma',len(state), state, maxk)
         # selected_action = np.argmax(state)
-        selected_action = mink//step
+        selected_action = mink // step
         if random.random() < sigma:
             selected_action = random.choice(list(range(self.action_dim)))
         return selected_action
 
     def prepare_run(self, desp_str, pytorch_model, tokenizer, data_jsons, inc_class, max_epochs=200, action_dim=13):
         self.env = XXEnv(scratch_dirpath=self.scratch_dirpath)
-        self.state = self.env.reset_with_desp(desp_str, pytorch_model, tokenizer, data_jsons, inc_class, max_epochs=max_epochs, action_dim=action_dim)
+        self.state = self.env.reset_with_desp(desp_str, pytorch_model, tokenizer, data_jsons, inc_class,
+                                              max_epochs=max_epochs, action_dim=action_dim)
         self.done = False
 
     def run(self, max_epochs=5):
         action = self.select_action_func(self.state)
-        next_state, reward, done, max_te_asr, min_score, rst_dict = self.env.step(action, max_epochs=max_epochs, return_dict=True)
+        next_state, reward, done, max_te_asr, min_score, rst_dict = self.env.step(action, max_epochs=max_epochs,
+                                                                                  return_dict=True)
 
         self.state = next_state
         self.done = done
@@ -891,7 +894,7 @@ def seed_torch(seed):
 
 
 def show_record(record_file):
-    with open(record_file,'rb') as f:
+    with open(record_file, 'rb') as f:
         data = pickle.load(f)
     record = data['train_record']
     scores = record['scores']
