@@ -11,7 +11,12 @@ model_architecture = ['roberta-base', 'google/electra-small-discriminator', 'dis
 def prepare_data():
     gt_lb = dict()
     for row in gt_csv:
+        if row['task_type'] != 'ner':
+            continue
         md_name = row['model_name']
+        md_num = int(md_name.split('-')[1])
+        if md_num > 90 :
+            continue
         poisoned = row['poisoned']
         lb = 0
         if poisoned == 'True':
@@ -65,12 +70,12 @@ def prepare_data():
                 crt_style.append(gt_lb[md_name]['probs'][1])
     values, counts = np.unique(wrg_style, return_counts=True)
     print('tot benign > %.1f: %d//%d'%(thr, wrg_cnt, tot_beg))
-    print(values)
-    print(counts)
+    print('type:', values)
+    print('cont:', counts)
     values, counts = np.unique(crt_style, return_counts=True)
     print('tot poison > %.1f: %d//%d'%(thr, crt_cnt, tot_poi))
-    print(values)
-    print(counts)
+    print('type:', values)
+    print('cont:', counts)
     from example_trojan_detector import global_hash_map, global_hash_name_map
     print(global_hash_map)
     print(global_hash_name_map)
@@ -251,6 +256,6 @@ def train_rf(gt_lb):
 if __name__ == '__main__':
     gt_lb = prepare_data()
     train_only_lr(gt_lb)
-    train_rf(gt_lb)
+    # train_rf(gt_lb)
 
     # train_rf(None)
