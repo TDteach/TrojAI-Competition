@@ -84,6 +84,7 @@ def final_linear_adjust(o_sc, param):
 
 
 global_hash_map = dict()
+global_hash_name_map = dict()
 
 
 def get_feature(data, hash_map=None):
@@ -93,6 +94,8 @@ def get_feature(data, hash_map=None):
     if hash_map is None:
         global global_hash_map
         hash_map = global_hash_map
+        global global_hash_name_map
+        hash_name_map = global_hash_name_map
 
     hash_str = str(data['trigger_info'])
     hash_str = hash_str.split(':')[0]
@@ -100,6 +103,7 @@ def get_feature(data, hash_map=None):
     hash_v = hash(hash_str)
     if hash_v not in hash_map:
         hash_map[hash_v] = len(hash_map)
+        hash_name_map[hash_v] = hash_str
     feat.append(hash_map[hash_v])
     return np.asarray(feat)
 
