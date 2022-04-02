@@ -63,6 +63,7 @@ def trigger_epoch(delta,
                   delta_mask=None,
                   return_acc=False,
                   return_logits=False,
+                  LM_model=None,
                   ):
     if weight_cut is None:
         weight_cut = get_weight_cut(model, delta_mask)
@@ -125,15 +126,39 @@ def trigger_epoch(delta,
                                  inputs_embeds=embeddings,
                                  labels=labels,
                                  )
+
+            if LM_model:
+                with torch.no_grad():
+                    token_logits = LM_model(attention_mask=attention_mask,
+                                            inputs_embeds=embeddings,
+                                            ).logits
         else:
             model_output = model(input_ids=None,
                                  attention_mask=attention_mask,
                                  inputs_embeds=inputs_embeds,
                                  labels=labels,
                                  )
+            if LM_model:
+                with torch.no_grad():
+                    token_logits = LM_model(attention_mask=attention_mask,
+                                            inputs_embeds=inputs_embeds,
+                                            ).logits
 
         logits = model_output.logits
         loss = model_output.loss
+
+        if LM_model:
+            dotsum_list = list()
+            for k, idx in enumerate(insert_idx):
+                if idx < 0: continue
+                aa = token_logits[k, idx:idx + insert_many, :]
+                soft_aa = F.softmax(aa, dtype=torch.float32, dim=-1)
+                dotsum = torch.sum(soft_aa.data * soft_delta, axis=-1)
+                dotsum = torch.unsqueeze(dotsum, axis=0)
+                dotsum_list.append(dotsum)
+            dotsum_list = torch.cat(dotsum_list, axis=0)
+            mean_dotsum = torch.mean(dotsum_list, axis=0)
+            mean_dotsum = torch.sum(mean_dotsum)
 
         if return_logits:
             gd_logits = logits.detach()
@@ -149,6 +174,8 @@ def trigger_epoch(delta,
         loss_list.append(loss.item())
 
         if optimizer:
+            if LM_model:
+                loss -= 10.0 * mean_dotsum
             optimizer.zero_grad()
             loss.backward(retain_graph=True)
             optimizer.step()

@@ -14,8 +14,6 @@ from trojan_detector_base import test_trigger
 
 import transformers
 
-random.seed(777)
-
 
 def add_trigger_template_into_data(data, trigger_info, mask_token):
     tok, tag, lab = data

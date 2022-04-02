@@ -62,7 +62,6 @@ def add_trigger_template_into_data(data, trigger_info):
             wk = random.randint(li + 1, len(words))
         else:
             wk = random.randint(1, len(words))
-        # wk = random.randint(1, len(words))
 
     insert_template = ['#'] * trigger_info.n
 
@@ -84,7 +83,6 @@ def add_trigger_template_into_data(data, trigger_info):
             wk = random.randint(li + 1, len(words))
         else:
             wk = random.randint(1, len(words))
-        # wk = random.randint(1, len(words))
         inserted_que = words[:wk] + insert_template + words[wk:]
         idx = len(' '.join(inserted_que[:wk])) + (wk > 0)
         idx_pair[1] = idx
@@ -112,6 +110,7 @@ def trigger_epoch(delta,
                   delta_mask=None,
                   return_acc=False,
                   return_logits=False,
+                  LM_model=None,
                   ):
     if weight_cut is None:
         weight_cut = get_weight_cut(model, delta_mask)
@@ -126,7 +125,7 @@ def trigger_epoch(delta,
         soft_delta = F.softmax(delta_tensor / temperature, dtype=torch.float32, dim=-1)
 
     if return_logits:
-        all_preds = None
+        all_logits = None
     if return_acc:
         crt, tot = 0, 0
     loss_list = list()
@@ -181,6 +180,12 @@ def trigger_epoch(delta,
                                       end_positions=end_positions,
                                       inputs_embeds=embeddings,
                                       )
+
+            if LM_model:
+                with torch.no_grad():
+                    token_logits = LM_model(attention_mask=attention_mask,
+                                            inputs_embeds=embeddings,
+                                            ).logits
         else:
             model_output_dict = model(input_ids=None,
                                       attention_mask=attention_mask,
@@ -189,13 +194,34 @@ def trigger_epoch(delta,
                                       end_positions=end_positions,
                                       inputs_embeds=inputs_embeds,
                                       )
+            if LM_model:
+                with torch.no_grad():
+                    token_logits = LM_model(attention_mask=attention_mask,
+                                            inputs_embeds=inputs_embeds,
+                                            ).logits
 
         start_logits = model_output_dict['start_logits']
         end_logits = model_output_dict['end_logits']
+
+        if LM_model:
+            dotsum_list = list()
+            for k, idx_pair in enumerate(insert_idx):
+                for idx in idx_pair:
+                    if idx < 0: continue
+                    aa = token_logits[k, idx:idx + insert_many, :]
+                    soft_aa = F.softmax(aa, dtype=torch.float32, dim=-1)
+                    dotsum = torch.sum(soft_aa.data * soft_delta, axis=-1)
+                    dotsum = torch.unsqueeze(dotsum, axis=0)
+                    dotsum_list.append(dotsum)
+            dotsum_list = torch.cat(dotsum_list, axis=0)
+            mean_dotsum = torch.mean(dotsum_list, axis=0)
+            mean_dotsum = torch.sum(mean_dotsum)
+
         if return_logits:
             logits = (start_logits.detach(), end_logits.detach())
-            all_preds = logits if all_preds is None else transformers.trainer_pt_utils.nested_concat(all_preds, logits,
-                                                                                                     padding_index=-100)
+            all_logits = logits if all_logits is None else transformers.trainer_pt_utils.nested_concat(all_logits,
+                                                                                                       logits,
+                                                                                                       padding_index=-100)
 
         if len(start_positions.size()) > 1:
             start_positions = start_positions.squeeze(-1)
@@ -224,6 +250,8 @@ def trigger_epoch(delta,
         loss_list.append(loss.item())
 
         if optimizer:
+            if LM_model:
+                loss -= 10.0 * mean_dotsum
             optimizer.zero_grad()
             loss.backward(retain_graph=True)
             optimizer.step()
@@ -235,11 +263,11 @@ def trigger_epoch(delta,
     soft_delta_numpy = soft_delta.detach().cpu().numpy()
 
     if return_acc and return_logits:
-        return loss_list, soft_delta_numpy, crt / tot * 100, all_preds
+        return loss_list, soft_delta_numpy, crt / tot * 100, all_logits
     elif return_acc:
         return loss_list, soft_delta_numpy, crt / tot * 100
     elif return_logits:
-        return loss_list, soft_delta_numpy, all_preds
+        return loss_list, soft_delta_numpy, all_logits
     return loss_list, soft_delta_numpy
 
 
@@ -469,8 +497,10 @@ def tokenize_for_qa(tokenizer, dataset, trigger_info=None, data_limit=None):
 
 
 class TrojanTesterQA(TrojanTester):
-    def __init__(self, model, tokenizer, data_jsons, trigger_info, scratch_dirpath, max_epochs, batch_size=None, enable_tqdm=False):
-        super().__init__(model, tokenizer, trigger_info, scratch_dirpath, max_epochs, trigger_epoch, batch_size, enable_tqdm)
+    def __init__(self, model, tokenizer, data_jsons, trigger_info, scratch_dirpath, max_epochs, batch_size=None,
+                 enable_tqdm=False):
+        super().__init__(model, tokenizer, trigger_info, scratch_dirpath, max_epochs, trigger_epoch, batch_size,
+                         enable_tqdm)
         self.build_dataset(data_jsons, tokenize_for_qa)
 
 

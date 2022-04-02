@@ -41,8 +41,9 @@ row_filter = {
     # 'model_architecture':['google/electra-small-discriminator'],
     # 'model_architecture':['deepset/roberta-base-squad2'],
     # 'model_architecture': ['roberta-base'],
-    'model_architecture': None,
-    'source_dataset': ['ner:conll2003'],
+    # 'model_architecture': None,
+    # 'source_dataset': ['ner:conll2003'],
+    # 'source_dataset': ['sc:imdb'],
     # 'source_dataset': None,
     'task_type': None
 }
@@ -139,6 +140,7 @@ def tryah(examples_filepath, tokenizer_filepath):
 
 
 if __name__ == '__main__':
+
     gt_csv = read_csv(gt_csv_path)
     data_dict = filter_gt_csv_row(gt_csv, row_filter)
     dirs = sorted(data_dict.keys())
@@ -151,7 +153,7 @@ if __name__ == '__main__':
         # if k<40: continue
 
         # if name_num >= 10: continue
-        if not md_name == 'id-00000012':
+        if not md_name == 'id-00000022':
             continue
 
         md_archi = data_dict[md_name]['model_architecture']

@@ -12,7 +12,6 @@ from tqdm import tqdm
 from example_trojan_detector import g_batch_size, simg_data_fo, TriggerInfo
 from rainbow import DQNActor
 
-
 # from transformers import logging
 # logging.set_verbosity_warning()
 
@@ -22,7 +21,7 @@ def test_trigger(trigger_epoch, model, dataloader, trigger_numpy, return_logits=
     trigger_copy = trigger_numpy.copy()
     max_ord = np.argmax(trigger_copy, axis=1)
 
-    # max_ord = np.asarray([1507,1117,1148,1576,1104,27901,4184,2881,1183])
+    # max_ord = np.asarray([37052, 13270, 22832, 41175, 4760, 15067, 21174])
 
     print('test trigger max_ord', max_ord)
     trigger_copy = np.ones(trigger_numpy.shape, dtype=np.float32) * -20
@@ -31,17 +30,16 @@ def test_trigger(trigger_epoch, model, dataloader, trigger_numpy, return_logits=
     delta = Variable(torch.from_numpy(trigger_copy))
 
     if return_logits:
-        with torch.no_grad():
-            loss_list, _, acc, all_logits = trigger_epoch(delta=delta,
-                                                          model=model,
-                                                          dataloader=dataloader,
-                                                          weight_cut=None,
-                                                          optimizer=None,
-                                                          temperature=1.0,
-                                                          delta_mask=None,
-                                                          return_acc=True,
-                                                          return_logits=True,
-                                                          )
+        loss_list, _, acc, all_logits = trigger_epoch(delta=delta,
+                                                      model=model,
+                                                      dataloader=dataloader,
+                                                      weight_cut=None,
+                                                      optimizer=None,
+                                                      temperature=1.0,
+                                                      delta_mask=None,
+                                                      return_acc=True,
+                                                      return_logits=True,
+                                                      )
         return acc, np.mean(loss_list), all_logits
 
     with torch.no_grad():
@@ -75,24 +73,28 @@ def get_LM_model(model):
     model_name = type(model).__name__
     model_name = model_name.lower()
     from transformers import AutoConfig, AutoModelForMaskedLM
+
+    # Download configuration from huggingface.co and cache.
+    config = AutoConfig.from_pretrained("bert-base-cased")
+    # print(model_name)
     if 'electra' in model_name:
         config = AutoConfig.from_pretrained("google/electra-small-discriminator")
         LMmodel = AutoModelForMaskedLM.from_config(config)
         # from transformers import ElectraForMaskedLM
         # LMmodel = ElectraForMaskedLM.from_pretrained("google/electra-small-discriminator")
-        # LMmodel.electra = model.electra
+        LMmodel.electra = model.electra
     elif 'distilbert' in model_name:
         config = AutoConfig.from_pretrained("distilbert-base-cased")
         LMmodel = AutoModelForMaskedLM.from_config(config)
         # from transformers import DistilBertForMaskedLM
         # LMmodel = DistilBertForMaskedLM.from_pretrained("distilbert-base-cased")
-        # LMmodel.distilbert = model.distilbert
+        LMmodel.distilbert = model.distilbert
     elif 'roberta' in model_name:
         config = AutoConfig.from_pretrained("roberta-base")
         LMmodel = AutoModelForMaskedLM.from_config(config)
         # from transformers import RobertaForMaskedLM
         # LMmodel = RobertaForMaskedLM.from_pretrained("roberta-base")
-        # LMmodel.roberta = model.roberta
+        LMmodel.roberta = model.roberta
     return LMmodel
 
 
@@ -114,7 +116,7 @@ def get_weight_cut(model, delta_mask):
 
 class TrojanTester:
     def __init__(self, model, tokenizer, trigger_info, scratch_dirpath, max_epochs, trigger_epoch_func, batch_size=None,
-                 enable_tqdm=False, use_LM_model=True):
+                 enable_tqdm=False, use_LM_model=False):
         self.model = model
         if use_LM_model:
             self.LM_model = get_LM_model(self.model).to(self.model.device)
@@ -148,10 +150,10 @@ class TrojanTester:
         self.params = {
             'beta': 0.2,
             'C': 2.0,
+            'U': 1.0,
             'L': 0.25,
             'lr': 0.8,
             'epsilon': 0.1,
-            'temperature': 1.0,
             'end_position_rate': 1.0,
         }
 
@@ -188,19 +190,20 @@ class TrojanTester:
         ndata = len(tokenized_dataset)
         print('rst len:', ndata)
         nre = ndata - ntr - nte
-        tr_dataset, te_dataset, _ = torch.utils.data.random_split(tokenized_dataset, [ntr, nte, nre])
+        tr_dataset, te_dataset, _ = torch.utils.data.random_split(tokenized_dataset, [ntr, nte, nre], generator=torch.Generator().manual_seed(777))
         # tr_dataset.indices = random.sample(self.valid_indice, ntr)
         self.tr_indices = tr_dataset.indices
         self.te_indices = te_dataset.indices
         print('n_ntr:', len(tr_dataset))
         print('n_nte:', len(te_dataset))
         self.tr_dataloader = torch.utils.data.DataLoader(tr_dataset, batch_size=self.batch_size, shuffle=True)
+        # self.tr_dataloader = torch.utils.data.DataLoader(tr_dataset, batch_size=1, shuffle=True)
         self.te_dataloader = torch.utils.data.DataLoader(te_dataset, batch_size=self.batch_size, shuffle=False)
 
     def run(self, delta_mask=None, max_epochs=200, restart=False):
 
         if len(self.attempt_records) == 0 or restart:
-            print('restart to', max_epochs)
+            print('restart', max_epochs)
 
             self.optimizer = None
             self.delta = None
@@ -208,7 +211,7 @@ class TrojanTester:
             max_epochs = max_epochs
         else:
             max_epochs = min(self.current_epoch + 1 + max_epochs, self.max_epochs)
-            print('no restart to', max_epochs)
+            print('no restart', max_epochs)
 
         if self.check_done():
             print('check_done is True, exit before _reverse_trigger')
@@ -252,12 +255,12 @@ class TrojanTester:
         weight = emb_model.word_embeddings.weight
         tot_tokens = weight.shape[0]
 
-        if init_delta is None:
-            zero_delta = np.zeros([insert_many, tot_tokens], dtype=np.float32)
-        else:
-            zero_delta = init_delta.copy()
-
         if self.delta is None:
+            if init_delta is None:
+                zero_delta = np.zeros([insert_many, tot_tokens], dtype=np.float32)
+            else:
+                zero_delta = init_delta.copy()
+
             if delta_mask is not None:
                 z_list = list()
                 for i in range(insert_many):
@@ -265,51 +268,27 @@ class TrojanTester:
                     z_list.append(zero_delta[i, sel_idx])
                 zero_delta = np.asarray(z_list)
             self.delta_mask = delta_mask
-            self.delta = Variable(torch.from_numpy(zero_delta), requires_grad=True)
-            self.optimizer = torch.optim.Adam([self.delta], lr=0.5)
 
+            self.delta = Variable(torch.from_numpy(zero_delta), requires_grad=True)
+            self.optimizer = torch.optim.AdamW([self.delta], lr=self.params['lr'])
+
+        delta = self.delta
+        delta_mask = self.delta_mask
         weight_cut = get_weight_cut(self.model, delta_mask)
+
+        if not hasattr(self, 'best_rst'):
+            print('init best_rst')
+            self.best_rst, self.stage_best_rst = None, None
 
         beta = self.params['beta']
         C = self.params['C']
+        U = self.params['U']
         L = self.params['L']
         lr = self.params['lr']
+        epsilon = self.params['epsilon']
+        temperature = U
         end_position_rate = self.params['end_position_rate']
-
-        stable_threshold = 1.0
-        stalled_patience = 2
-        restart_bound = 20
-        lr_adj_rate = 2.0
-        lr_down_bound = 5
-        lr_down_patience = 4
-
-        next_round = False
-        stalled = 0
-        speed = 0.2
-        lr_L = 0.4
-        lr_down_pool = 0
-        round_counter = 0
-        temperature = self.params['temperature']
-
-        # load checkpoint
         stage_best_rst = self.stage_best_rst
-        best_rst = self.best_rst
-        delta_mask = self.delta_mask
-        delta = self.delta
-        optimizer = self.optimizer
-        if self.checkpoint is not None:
-            next_round = self.checkpoint['next_round']
-            stalled = self.checkpoint['stalled']
-            speed = self.checkpoint['speed']
-            lr_L = self.checkpoint['lr_L']
-            lr_down_pool = self.checkpoint['lr_down_pool']
-            round_counter = self.checkpoint['round_counter']
-            temperature = self.checkpoint['temperature']
-
-        def _compare_rst(rst0, rst1):
-            if rst1 is None: return rst0
-            if rst0 is None or rst1['score'] < rst0['score']: return rst1
-            return rst0
 
         def _calc_score(loss, consc):
             return max(loss - beta, 0) + 0.5 * (1 - consc)
@@ -318,13 +297,34 @@ class TrojanTester:
             pbar = tqdm(range(self.current_epoch + 1, max_epochs))
         else:
             pbar = list(range(self.current_epoch + 1, max_epochs))
+        
+        next_round = False
+        stalled = 0
+        stable_threshold = 1.0
+        stalled_patience = 2
+        round_loss = None
+        round_jd = None
+        speed = 0.2
+        round_counter = 0
+        restart_bound = 20
+        lr_adj_rate = 2.0
+        lr_down_bound = 5
+        lr_down_pool = 0
+        lr_down_patience = 4
+        lr_L = 0.4
+
         for epoch in pbar:
             self.current_epoch = epoch
+
+            if self.current_epoch * 2 > self.max_epochs or (self.best_rst and self.best_rst['loss'] < beta):
+                end_position_rate = 1.0
 
             if self.current_epoch > 0 and next_round:
 
                 next_round = False
                 stalled = 0
+                round_loss = None
+                round_jd = None
 
                 if round_counter < lr_down_bound:
                     lr_down_pool += 1
@@ -343,47 +343,46 @@ class TrojanTester:
 
                 if stage_best_rst['loss'] < stable_threshold:
                     speed = 0.1
-                    delta.data = best_rst['data']
+                    delta.data = self.best_rst['data']
                     lr_L = 0.2
 
-                optimizer = torch.optim.AdamW([delta], lr=lr)
+                self.optimizer = torch.optim.AdamW([delta], lr=lr)
                 round_counter = 0
                 stage_best_rst = None
 
+
             loss_list, soft_delta_numpy = self.trigger_epoch_func(delta=delta,
-                                                                  model=self.model,
-                                                                  dataloader=self.tr_dataloader,
-                                                                  weight_cut=weight_cut,
-                                                                  optimizer=optimizer,
-                                                                  temperature=temperature,
-                                                                  end_position_rate=end_position_rate,
-                                                                  delta_mask=delta_mask,
-                                                                  LM_model=self.LM_model,
-                                                                  )
+                                                        model=self.model,
+                                                        dataloader=self.tr_dataloader,
+                                                        weight_cut=weight_cut,
+                                                        optimizer=self.optimizer,
+                                                        temperature=temperature,
+                                                        delta_mask=delta_mask,
+                                                        )
 
             consc = np.min(np.max(soft_delta_numpy, axis=1))
-            epoch_loss = np.mean(loss_list[-10:])
+            epoch_avg_loss = np.mean(loss_list[-10:])
 
-            jd_score = _calc_score(epoch_loss, consc)
+            jd_score = _calc_score(epoch_avg_loss, consc)
 
-            current_rst = {
-                'loss': epoch_loss,
-                'consc': consc,
-                'data': delta.data.clone(),
-                'temp': temperature,
-                'score': jd_score
-            }
-            stage_best_rst = _compare_rst(stage_best_rst, current_rst)
+            if stage_best_rst is None or jd_score < stage_best_rst['score']:
+                stage_best_rst = {'loss': epoch_avg_loss,
+                                  'consc': consc,
+                                  'data': delta.data.clone(),
+                                  'temp': temperature,
+                                  'score': jd_score,
+                                  }
 
             round_counter += 1
-            if best_rst is not None:
-                if best_rst['loss'] < beta:
-                    if jd_score < best_rst['score'] - speed:
+
+            if self.best_rst is not None:
+                if self.best_rst['loss'] < beta:
+                    if jd_score < self.best_rst['score'] - speed:
                         stalled = 0
                     else:
                         stalled += 1
                 else:
-                    if epoch_loss < best_rst['loss'] - speed:
+                    if epoch_avg_loss < self.best_rst['loss'] - speed:
                         stalled = 0
                     else:
                         stalled += 1
@@ -391,34 +390,22 @@ class TrojanTester:
                 if stalled > stalled_patience:
                     next_round = True
 
+            if self.best_rst is None or stage_best_rst['score'] < self.best_rst['score']:
+                self.best_rst = stage_best_rst.copy()
+
             if round_counter > restart_bound:
                 next_round = True
 
-            best_rst = _compare_rst(best_rst, current_rst)
-
             if enable_tqdm:
                 pbar.set_description('epoch %d: temp %.2f, loss %.2f, condense %.2f / %d, score %.2f' % (
-                    epoch, temperature, epoch_loss, consc * insert_many, insert_many, jd_score))
+                    epoch, temperature, epoch_avg_loss, consc * insert_many, insert_many, jd_score))
 
             if self.check_done():
                 break
 
-        # store checkpoint
-        self.stage_best_rst = stage_best_rst
-        self.best_rst = best_rst
-        self.delta_mask = delta_mask
+        self.params['temperature'] = temperature  # update temperature
         self.delta = delta
-        self.optimizer = optimizer
-        self.checkpoint = {
-            'next_round': next_round,
-            'stalled': stalled,
-            'speed': speed,
-            'lr_L': lr_L,
-            'lr_down_pool': lr_down_pool,
-            'round_counter': round_counter,
-            'temperature': temperature,
-        }
-
+        self.stage_best_rst = stage_best_rst
         delta_v = self.best_rst['data'].detach().cpu().numpy() / self.best_rst['temp']
 
         if delta_mask is not None:
@@ -429,18 +416,17 @@ class TrojanTester:
             delta_v = zero_delta
 
         train_asr, loss_avg = test_trigger(self.trigger_epoch_func, self.model, self.tr_dataloader, delta_v)
-        print('train ASR: %.2f%%' % train_asr, 'loss: %.3f' % loss_avg)
 
-        ret_dict = {'loss': self.best_rst['loss'],
-                    'consc': self.best_rst['consc'],
-                    'data': delta_v,
-                    'temp': self.best_rst['temp'],
-                    'score': _calc_score(self.best_rst['loss'], self.best_rst['consc']),
-                    'tr_asr': train_asr,
-                    'val_loss': loss_avg,
-                    }
-        print('return', 'score:', ret_dict['score'], 'loss:', ret_dict['loss'], 'consc:', ret_dict['consc'])
-        return ret_dict
+        ret_rst = {'loss': self.best_rst['loss'],
+                   'consc': self.best_rst['consc'],
+                   'data': delta_v,
+                   'temp': self.best_rst['temp'],
+                   'score': _calc_score(self.best_rst['loss'], self.best_rst['consc']),
+                   'tr_asr': train_asr,
+                   'val_loss': loss_avg,
+                   }
+        print('return', 'score:', ret_rst['score'], 'loss:', ret_rst['loss'], 'consc:', ret_rst['consc'])
+        return ret_rst
 
 
 class TrojanDetector:
