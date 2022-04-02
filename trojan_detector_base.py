@@ -12,9 +12,9 @@ from tqdm import tqdm
 from example_trojan_detector import g_batch_size, simg_data_fo, TriggerInfo
 from rainbow import DQNActor
 
-
 # from transformers import logging
 # logging.set_verbosity_warning()
+
 
 def test_trigger(trigger_epoch, model, dataloader, trigger_numpy, return_logits=False):
     model.eval()
@@ -184,45 +184,6 @@ class TrojanTester:
 
         self.random_split_dataset()
 
-        '''
-        device = self.model.device
-        LMmodel = get_LM_model(self.model).to(device)
-        for batch_idx, tensor_dict in enumerate(self.tr_dataloader):
-            input_ids = tensor_dict['input_ids'].to(device)
-            attention_mask = tensor_dict['attention_mask'].to(device)
-            labels = tensor_dict['labels'].to(device)
-            label_masks = tensor_dict['label_masks']
-
-            token_logits = LMmodel(input_ids=input_ids, attention_mask=attention_mask).logits
-            # Find the location of [MASK] and extract its logits
-            input_ids = input_ids.detach().cpu().numpy()[0]
-            mask_token_index = np.argwhere(input_ids == self.tokenizer.mask_token_id)
-            mask_token_index = mask_token_index.squeeze(axis=-1)
-            token_logits = token_logits.detach().cpu().numpy()
-            mask_token_logits = token_logits[0, mask_token_index, :]
-
-            # Pick the [MASK] candidates with the highest logits
-            # We negate the array before argsort to get the largest, not the smallest, logits
-            top_5_tokens = np.argsort(-mask_token_logits, axis=-1)[:, :5].tolist()
-
-            text = self.tokenizer.decode(input_ids)
-            text = text.replace(self.tokenizer.pad_token, '')
-            mask_token = self.tokenizer.mask_token
-            print(text)
-            for k in range(5):
-
-                a = [token[k] for token in top_5_tokens]
-                rep = self.tokenizer.decode(a)
-
-                _text = text
-                z = _text.find(mask_token)
-                w = _text.rfind(mask_token) + len(mask_token)
-
-                _text = _text[:z] + rep + _text[w:]
-                print(_text)
-            exit(0)
-        # '''
-
     def random_split_dataset(self):
         ndata = len(self.raw_dataset)
         ntr = min(int(ndata * 0.8), max(self.batch_size * 3, 24))
@@ -295,12 +256,6 @@ class TrojanTester:
         emb_model = get_embed_model(self.model)
         weight = emb_model.word_embeddings.weight
         tot_tokens = weight.shape[0]
-
-        # for _ in range(10):
-        #     delta_v = np.zeros([insert_many, tot_tokens], dtype=np.float32)
-        #     train_asr, loss_avg = test_trigger(self.trigger_epoch_func, self.model, self.tr_dataloader, delta_v)
-        #     print(train_asr, loss_avg)
-        # exit(0)
 
         if init_delta is None:
             zero_delta = np.zeros([insert_many, tot_tokens], dtype=np.float32)
@@ -408,39 +363,6 @@ class TrojanTester:
 
                 stage_best_rst = None
 
-            '''
-            LM_model = get_LM_model(self.model).to(self.model.device)
-            emb_model = get_embed_model(LM_model)
-            weight = emb_model.word_embeddings.weight
-            model_name = type(LM_model).__name__
-            model_name = model_name.lower()
-            print(model_name)
-            print(weight.shape)
-            emb_model = get_embed_model(self.model)
-            weight = emb_model.word_embeddings.weight
-            print(weight.shape)
-            # exit(0)
-            adict = dict()
-            a = self.tokenizer.convert_ids_to_tokens(ids=np.arange(50625))
-            for k,z in enumerate(a):
-                if z not in adict:
-                    adict[z] = list()
-                adict[z].append(k)
-            from transformers import DistilBertTokenizer
-            tokenizer = DistilBertTokenizer.from_pretrained("distilbert-base-cased")
-            b = tokenizer.convert_ids_to_tokens(ids=np.arange(50625))
-            for k,z in enumerate(b):
-                if z not in adict:
-                    adict[z]=[]
-                adict[z].append(k)
-            ww = 0
-            for z in adict:
-                if len(adict[z]) >= 2 and adict[z][0] != adict[z][1]:
-                    print(z, adict[z])
-                    ww += 1
-            print(ww)
-            exit(0)
-            '''
             loss_list, soft_delta_numpy = self.trigger_epoch_func(delta=delta,
                                                                   model=self.model,
                                                                   dataloader=self.tr_dataloader,
