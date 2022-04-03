@@ -21,7 +21,7 @@ From: pytorch/pytorch:1.8.0-cuda11.1-cudnn8-runtime
     ./metaparameters_schema.json /
     ./config.json /
     ./learned_parameters /
-    ./adj_param.pkl /
+    ./adj_lr_param.pkl /
     ./dqn_record.pkl /
     ./lgbm.joblib /
 

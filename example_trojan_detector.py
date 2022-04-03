@@ -108,6 +108,22 @@ def get_feature(data, hash_map=None):
     return np.asarray(feat)
 
 
+def post_deal_lr(record_dict):
+    adj_path = os.path.join(simg_data_fo, 'adj_lr_param.pkl')
+    with open(adj_path, 'rb') as f:
+        data = pickle.load(f)
+    hash_map = data['hash_map']
+    lr_param_dict = data['lr_param_dict']
+
+    feat = get_feature(record_dict, hash_map=hash_map)
+
+    ta = feat[1]
+    prob = feat[0]
+    lr_param = lr_param_dict[ta]
+    trojan_probability = final_linear_adjust(prob, lr_param)
+    return trojan_probability
+
+
 def trojan_detector(model_filepath, tokenizer_filepath, result_filepath, scratch_dirpath, examples_dirpath,
                     examples_filepath=None):
     print('model_filepath = {}'.format(model_filepath))
@@ -180,24 +196,7 @@ def trojan_detector(model_filepath, tokenizer_filepath, result_filepath, scratch
 
     # if False:
     if RELEASE:
-        adj_path = os.path.join(simg_data_fo, 'adj_param.pkl')
-        with open(adj_path, 'rb') as f:
-            adj_param = pickle.load(f)
-        hash_map = adj_param['hash_map']
-        lr_param = adj_param['lr_param']
-
-        feat = get_feature(record_dict, hash_map=hash_map)
-        if len(feat.shape) < 2:
-            feat = np.expand_dims(feat, axis=0)
-
-        import joblib
-        md_path = os.path.join(simg_data_fo, 'lgbm.joblib')
-        rf_clf = joblib.load(md_path)
-        prob = rf_clf.predict_proba(feat)
-
-        if trojan_probability > 0.99: trojan_probability = 1.0
-        else:
-            trojan_probability = final_linear_adjust(prob[0, 1], lr_param)
+        trojan_probability = post_deal_lr(record_dict)
 
     print('Trojan Probability: {}'.format(trojan_probability))
     with open(result_filepath, 'w') as fh:
