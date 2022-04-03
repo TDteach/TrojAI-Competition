@@ -27,9 +27,76 @@ import random
 logger = logging.getLogger(__name__)
 
 
+def R9_get_dummy_trigger_description(model_dirpath, random_inc=None):
+    with open(os.path.join(model_dirpath, 'config.json')) as json_file:
+        config = json.load(json_file)
+
+    if random_inc is None:
+        random_inc = random
+
+    z = random_inc.random()
+    if z < 0.5:
+        location = 'first'
+    else:
+        location = 'last'
+
+    trigger_type = 'dummy'
+    task_type = config['task_type']
+
+    if task_type.startswith('sc'):
+        from trojan_detector_sc import TrojanTesterSC
+        inc_class = TrojanTesterSC
+
+        src_lb = random_inc.randint(0, 1)
+        tgt_lb = 1 - src_lb
+        type = random_inc.choice(['class', 'normal'])
+        desp_str = 'sc:' + type + '_' + location
+    elif task_type.startswith('ner'):
+        from trojan_detector_ner import TrojanTesterNER
+        inc_class = TrojanTesterNER
+
+        src_lb = random_inc.choice([1, 3, 5, 7, 9])
+        tgt_lb = src_lb
+        while tgt_lb == src_lb:
+            tgt_lb = random_inc.choice([1, 3, 5, 7, 9])
+        type = random_inc.choice(['local', 'global'])
+        if 'local' in type:
+            desp_str = 'ner:' + type
+        else:
+            desp_str = 'ner:' + type + '_' + location
+        desp_str += '_%d_%d' % (src_lb, tgt_lb)
+    elif task_type.startswith('qa'):
+        from trojan_detector_qa import TrojanTesterQA
+        inc_class = TrojanTesterQA
+
+        decomp_desp = [''] * 3
+        decomp_desp[0] = random_inc.choice(['context', 'question', 'both'])
+        decomp_desp[1] = location
+        if decomp_desp[0] == 'question':
+            decomp_desp[2] = 'empty'
+        else:
+            decomp_desp[2] = random_inc.choice(['empty', 'trigger'])
+        desp_str = 'qa:' + '_'.join(decomp_desp)
+
+    trigger_type += '-'+desp_str
+
+    trig_desp = {
+        'desp_str': desp_str,
+        'trigger_text': None,
+        'trigger_type': trigger_type,
+        'detector_class': inc_class,
+    }
+
+    return trig_desp
+
+
 def R9_get_trigger_description(model_dirpath, random_inc=None):
     with open(os.path.join(model_dirpath, 'config.json')) as json_file:
         config = json.load(json_file)
+
+    if config['trigger'] is None:
+        return None
+
     trigger_type = config['trigger']['trigger_executor_option']
     trigger_exec = config['trigger']['trigger_executor']
 
@@ -94,16 +161,16 @@ def R9_get_trigger_description(model_dirpath, random_inc=None):
 
 
 def postprocess_qa_predictions(
-    examples,
-    features,
-    predictions: Tuple[np.ndarray, np.ndarray],
-    version_2_with_negative: bool = False,
-    n_best_size: int = 20,
-    max_answer_length: int = 30,
-    null_score_diff_threshold: float = 0.0,
-    output_dir: Optional[str] = None,
-    prefix: Optional[str] = None,
-    is_world_process_zero: bool = True,
+        examples,
+        features,
+        predictions: Tuple[np.ndarray, np.ndarray],
+        version_2_with_negative: bool = False,
+        n_best_size: int = 20,
+        max_answer_length: int = 30,
+        null_score_diff_threshold: float = 0.0,
+        output_dir: Optional[str] = None,
+        prefix: Optional[str] = None,
+        is_world_process_zero: bool = True,
 ):
     """
     Post-processes the predictions of a question-answering model to convert them to answers that are substrings of the
@@ -190,17 +257,17 @@ def postprocess_qa_predictions(
                 }
 
             # Go through all possibilities for the `n_best_size` greater start and end logits.
-            start_indexes = np.argsort(start_logits)[-1 : -n_best_size - 1 : -1].tolist()
-            end_indexes = np.argsort(end_logits)[-1 : -n_best_size - 1 : -1].tolist()
+            start_indexes = np.argsort(start_logits)[-1: -n_best_size - 1: -1].tolist()
+            end_indexes = np.argsort(end_logits)[-1: -n_best_size - 1: -1].tolist()
             for start_index in start_indexes:
                 for end_index in end_indexes:
                     # Don't consider out-of-scope answers, either because the indices are out of bounds or correspond
                     # to part of the input_ids that are not in the context.
                     if (
-                        start_index >= len(offset_mapping)
-                        or end_index >= len(offset_mapping)
-                        or offset_mapping[start_index] is None
-                        or offset_mapping[end_index] is None
+                            start_index >= len(offset_mapping)
+                            or end_index >= len(offset_mapping)
+                            or offset_mapping[start_index] is None
+                            or offset_mapping[end_index] is None
                     ):
                         continue
                     # Don't consider answers with a length that is either < 0 or > max_answer_length.
@@ -234,7 +301,7 @@ def postprocess_qa_predictions(
         context = example["context"]
         for pred in predictions:
             offsets = pred.pop("offsets")
-            pred["text"] = context[offsets[0] : offsets[1]]
+            pred["text"] = context[offsets[0]: offsets[1]]
 
         # In the very rare edge case we have not a single non-null prediction, we create a fake prediction to avoid
         # failure.
@@ -317,4 +384,3 @@ def split_text(text):
         word_idx_map[k] = cid
         cid += len(wd)
     return words, idx_word_map, word_idx_map
-

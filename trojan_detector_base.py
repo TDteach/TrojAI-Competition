@@ -531,6 +531,8 @@ class TrojanDetector:
         for ty in type_list:
             for lo in location_list:
                 for ta in target_list:
+                    if ty == 'question' and ta == 'trigger':
+                        continue
                     desp_str = 'qa:' + ty + '_' + lo + '_' + ta
                     inc = TriggerInfo(desp_str, 0)
                     attempt_list.append(inc)

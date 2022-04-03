@@ -1,16 +1,17 @@
 import os
 import torch
 import pickle
+import random
 from utils import read_csv, filter_gt_csv_row, get_R9_run_params
-from utils_nlp import R9_get_trigger_description
+from utils_nlp import R9_get_trigger_description, R9_get_dummy_trigger_description
 from batch_run import gt_csv_path, folder_root
 from example_trojan_detector import TriggerInfo
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 row_filter = {
-    'poisoned': ['True'],
-    # 'poisoned': ['False'],
-    'trigger.trigger_executor_option': ['qa:context_spatial_trigger'],
+    # 'poisoned': ['True'],
+    'poisoned': ['False'],
+    # 'trigger.trigger_executor_option': ['qa:context_spatial_trigger'],
     # 'trigger.trigger_executor_option': ['ner:local'],
     # 'trigger.trigger_executor_option': ['sc:spatial_class'],
     # 'model_architecture': ['google/electra-small-discriminator'],
@@ -34,7 +35,7 @@ def main():
     md_name_list = sorted(data_dict.keys())
 
     for k, md_name in enumerate(md_name_list):
-        if k < 1: continue
+        # if k < 1: continue
         # if not md_name == 'id-00000012':
         #     continue
 
@@ -52,18 +53,22 @@ def main():
         pytorch_model = torch.load(model_filepath, map_location=torch.device(device))
         tokenizer = torch.load(tokenizer_filepath)
 
-        # '''
         model_dirpath, _ = os.path.split(model_filepath)
         trig_desp = R9_get_trigger_description(model_dirpath)
 
+        if trig_desp:
+            trigger_text = trig_desp['trigger_text']
+            token_list = tokenizer.encode(trigger_text)
+            target_lenn = len(token_list) - 2
+        else:
+            trig_desp = R9_get_dummy_trigger_description(model_dirpath)
+            trigger_text = None
+            token_list = list()
+            target_lenn = random.randint(1, 13)
+
+        trigger_type = trig_desp['trigger_type']
         desp_str = trig_desp['desp_str']
         inc_class = trig_desp['detector_class']
-
-        trigger_text = trig_desp['trigger_text']
-        trigger_type = trig_desp['trigger_type']
-        token_list = tokenizer.encode(trigger_text)
-        target_lenn = len(token_list) - 2
-
         md_archi = _data_dict['model_architecture']
         print(model_dirpath)
         print(md_archi)
@@ -71,14 +76,6 @@ def main():
         print('trigger_text:', trigger_text)
         print('trigger_tokens:', token_list[1:-1])
         print('trigger_lenn:', target_lenn)
-        # '''
-
-        '''
-        desp_str = 'ner:local_5_7'
-        target_lenn = 6
-        from trojan_detector_ner import TrojanTesterNER
-        inc_class = TrojanTesterNER
-        '''
 
         trigger_info = TriggerInfo(desp_str, target_lenn)
         act_inc = inc_class(pytorch_model, tokenizer, data_jsons, trigger_info, scratch_dirpath, max_epochs=max_epochs, enable_tqdm=True)
