@@ -1,7 +1,7 @@
 import os
 import pickle
 import numpy as np
-from example_trojan_detector import get_feature, global_hash_map, global_hash_name_map
+from example_trojan_detector import get_feature, global_hash_map
 from batch_run_trojai import gt_csv
 import copy
 
@@ -77,7 +77,6 @@ def prepare_data():
     print('type:', values)
     print('cont:', counts)
     print(global_hash_map)
-    print(global_hash_name_map)
 
     return gt_lb
 
@@ -129,7 +128,7 @@ def train_only_lr(gt_lb):
         for k in global_hash_map:
             if global_hash_map[k] == t:
                 break
-        ta = global_hash_name_map[k]
+        ta = k
         auc = roc_auc_score(_Y, _X)
         print('task', ta, 'auc: %.4f' % (auc))
         best_lr_param = linear_adjust(_X, _Y)
