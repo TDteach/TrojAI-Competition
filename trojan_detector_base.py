@@ -16,6 +16,7 @@ from rainbow import DQNActor
 # from transformers import logging
 # logging.set_verbosity_warning()
 
+USE_LM_MODEL = False
 
 def test_trigger(trigger_epoch, model, dataloader, trigger_numpy, return_logits=False):
     model.eval()
@@ -114,7 +115,7 @@ def get_weight_cut(model, delta_mask):
 
 class TrojanTester:
     def __init__(self, model, tokenizer, trigger_info, scratch_dirpath, max_epochs, trigger_epoch_func, batch_size=None,
-                 enable_tqdm=False, use_LM_model=False):
+                 enable_tqdm=False, use_LM_model=USE_LM_MODEL):
         self.model = model
         if use_LM_model:
             self.LM_model = get_LM_model(self.model).to(self.model.device)

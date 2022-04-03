@@ -19,6 +19,9 @@ from game_env import XXEnv
 
 from utils import read_config
 
+TRAIN_WITH_SOFT_SAMPLING = False
+TEST_WITH_SOFT_SAMPLING = True
+
 
 class ReplayBuffer:
     """A simple numpy replay buffer."""
@@ -543,7 +546,7 @@ class DQNAgent:
         # mode: train / test
         self.is_test = False
 
-    def select_action(self, state: np.ndarray, soft_sampling=True) -> np.ndarray:
+    def select_action(self, state: np.ndarray, soft_sampling=TRAIN_WITH_SOFT_SAMPLING) -> np.ndarray:
         """Select an action from the input state."""
         # NoisyNet: no epsilon greedy action selection
         action_logits = self.dqn(
@@ -824,7 +827,7 @@ class DQNActor:
             setattr(self, key, store_dict[key])
         self.reset()
 
-    def select_action(self, state: np.ndarray, soft_sampling=True) -> np.ndarray:
+    def select_action(self, state: np.ndarray, soft_sampling=TEST_WITH_SOFT_SAMPLING) -> np.ndarray:
         """Select an action from the input state."""
         # NoisyNet: no epsilon greedy action selection
         action_logits = self.dqn(
