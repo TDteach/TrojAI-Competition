@@ -1,7 +1,7 @@
 import os
 import pickle
 import numpy as np
-from example_trojan_detector import get_feature, global_hash_map
+from example_trojan_detector import get_feature, global_hash_map, global_hash_name_map
 from batch_run_trojai import gt_csv
 import copy
 
@@ -11,8 +11,8 @@ model_architecture = ['roberta-base', 'google/electra-small-discriminator', 'dis
 def prepare_data():
     gt_lb = dict()
     for row in gt_csv:
-        if row['task_type'] != 'ner':
-            continue
+        #if row['task_type'] != 'sc':
+        #    continue
         md_name = row['model_name']
         md_num = int(md_name.split('-')[1])
         if md_num > 90 :
@@ -76,7 +76,6 @@ def prepare_data():
     print('tot poison > %.1f: %d//%d'%(thr, crt_cnt, tot_poi))
     print('type:', values)
     print('cont:', counts)
-    from example_trojan_detector import global_hash_map, global_hash_name_map
     print(global_hash_map)
     print(global_hash_name_map)
 
@@ -119,13 +118,24 @@ def linear_adjust(X, Y):
 def train_only_lr(gt_lb):
     X = np.asarray([gt_lb[k]['probs'][0] for k in gt_lb])
     Y = np.asarray([gt_lb[k]['lb'] for k in gt_lb])
+    C = np.asarray([gt_lb[k]['probs'][1] for k in gt_lb])
 
+    lr_param_dict = dict()
     from sklearn.metrics import roc_auc_score
-    auc = roc_auc_score(Y, X)
-    best_lr_param = linear_adjust(X, Y)
-    print('auc: %.4f' % (auc))
+    for t in range(3):
+        indice = C == t
+        _X = X[indice]
+        _Y = Y[indice]
+        for k in global_hash_map:
+            if global_hash_map[k] == t:
+                break
+        ta = global_hash_name_map[k]
+        auc = roc_auc_score(_Y, _X)
+        print('task', ta, 'auc: %.4f' % (auc))
+        best_lr_param = linear_adjust(_X, _Y)
+        lr_param_dict[t] = best_lr_param
 
-    adj_param = {'lr_param': best_lr_param}
+    adj_param = {'lr_param_dict': best_lr_param, 'hash_map': global_hash_map}
     outpath = 'adj_lr_param.pkl'
     with open(outpath, 'wb') as f:
         pickle.dump(adj_param, f)
