@@ -551,7 +551,7 @@ class TrojanDetector:
         stalled_patience = 10
         g_best_sc = None
 
-        max_rounds = 100
+        max_rounds = 80
         for round in range(max_rounds):
             best_sc, best_k = self.find_best(karm_dict, return_valied=True)
             if best_sc is None or karm_dict[best_k]['te_asr'] > 0.9999:

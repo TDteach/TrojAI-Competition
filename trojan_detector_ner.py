@@ -397,7 +397,6 @@ class TrojanTesterNER(TrojanTester):
         super().__init__(model, tokenizer, trigger_info, scratch_dirpath, max_epochs, trigger_epoch, batch_size,
                          enable_tqdm)
         self.build_dataset(data_jsons, tokenize_for_ner)
-        self.params['beta'] = 0.1
         self.max_epochs = 100
 
 
