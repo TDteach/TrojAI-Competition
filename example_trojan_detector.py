@@ -101,6 +101,9 @@ def get_feature(data, hash_map=None):
     hash_str = hash_str.split(':')[0]
 
     hash_v = hash(hash_str)
+    if hash_map is not None:
+        print(hash_str, hash_v)
+        print(hash_map)
     if hash_v not in hash_map:
         hash_map[hash_v] = len(hash_map)
         hash_name_map[hash_v] = hash_str

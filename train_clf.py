@@ -135,7 +135,7 @@ def train_only_lr(gt_lb):
         best_lr_param = linear_adjust(_X, _Y)
         lr_param_dict[t] = best_lr_param
 
-    adj_param = {'lr_param_dict': best_lr_param, 'hash_map': global_hash_map}
+    adj_param = {'lr_param_dict': lr_param_dict, 'hash_map': global_hash_map}
     outpath = 'adj_lr_param.pkl'
     with open(outpath, 'wb') as f:
         pickle.dump(adj_param, f)
