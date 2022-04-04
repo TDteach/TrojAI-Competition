@@ -130,6 +130,7 @@ def train_only_lr(gt_lb):
                 break
         ta = k
         auc = roc_auc_score(_Y, _X)
+        print('='*20)
         print('task', ta, 'auc: %.4f' % (auc))
         best_lr_param = linear_adjust(_X, _Y)
         lr_param_dict[t] = best_lr_param
