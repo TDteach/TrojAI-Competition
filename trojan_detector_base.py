@@ -75,25 +75,37 @@ def get_embed_model(model):
 def get_LM_model(model, scratch_dirpath):
     model_name = type(model).__name__
     model_name = model_name.lower()
+
+    ml_model_dir = os.path.join(simg_data_fo,'learned_parameters/LM_models')
     from transformers import AutoConfig, AutoModelForMaskedLM
     if 'electra' in model_name:
-        config = AutoConfig.from_pretrained("google/electra-small-discriminator", cache_dir=scratch_dirpath)
-        LMmodel = AutoModelForMaskedLM.from_config(config)
+        lm_model_path = os.path.join(ml_model_dir, 'google-electra-small-discriminator')
+        # config = AutoConfig.from_pretrained("google/electra-small-discriminator", cache_dir=ml_model_dir)
+        # LMmodel = AutoModelForMaskedLM.from_config(config)
+        LMmodel = AutoModelForMaskedLM.from_pretrained(lm_model_path)
         # from transformers import ElectraForMaskedLM
         # LMmodel = ElectraForMaskedLM.from_pretrained("google/electra-small-discriminator")
         # LMmodel.electra = model.electra
+        # LMmodel.save_pretrained(lm_model_path)
+        # exit(0)
     elif 'distilbert' in model_name:
-        config = AutoConfig.from_pretrained("distilbert-base-cased", cache_dir=scratch_dirpath)
-        LMmodel = AutoModelForMaskedLM.from_config(config)
+        lm_model_path = os.path.join(ml_model_dir, 'distilbert')
+        # config = AutoConfig.from_pretrained("distilbert-base-cased", cache_dir=ml_model_dir)
+        # LMmodel = AutoModelForMaskedLM.from_config(config)
+        LMmodel = AutoModelForMaskedLM.from_pretrained(lm_model_path)
         # from transformers import DistilBertForMaskedLM
         # LMmodel = DistilBertForMaskedLM.from_pretrained("distilbert-base-cased")
         # LMmodel.distilbert = model.distilbert
+        # LMmodel.save_pretrained(lm_model_path)
     elif 'roberta' in model_name:
-        config = AutoConfig.from_pretrained("roberta-base", cache_dir=scratch_dirpath)
-        LMmodel = AutoModelForMaskedLM.from_config(config)
+        lm_model_path = os.path.join(ml_model_dir, 'roberta-base')
+        # config = AutoConfig.from_pretrained("roberta-base", cache_dir=ml_model_dir)
+        # LMmodel = AutoModelForMaskedLM.from_config(config)
+        LMmodel = AutoModelForMaskedLM.from_pretrained(lm_model_path)
         # from transformers import RobertaForMaskedLM
         # LMmodel = RobertaForMaskedLM.from_pretrained("roberta-base")
         # LMmodel.roberta = model.roberta
+        # LMmodel.save_pretrained(lm_model_path)
     return LMmodel
 
 
