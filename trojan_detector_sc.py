@@ -391,7 +391,7 @@ class TrojanTesterSC(TrojanTester):
     def __init__(self, model, tokenizer, data_jsons, trigger_info, scratch_dirpath, max_epochs, batch_size=None,
                  enable_tqdm=False):
         super().__init__(model, tokenizer, trigger_info, scratch_dirpath, max_epochs, trigger_epoch, batch_size,
-                         enable_tqdm)
+                         enable_tqdm, use_LM_model=True)
         self.build_dataset(data_jsons, tokenize_for_sc)
 
 
