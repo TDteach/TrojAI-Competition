@@ -72,24 +72,24 @@ def get_embed_model(model):
     return emb
 
 
-def get_LM_model(model):
+def get_LM_model(model, scratch_dirpath):
     model_name = type(model).__name__
     model_name = model_name.lower()
     from transformers import AutoConfig, AutoModelForMaskedLM
     if 'electra' in model_name:
-        config = AutoConfig.from_pretrained("google/electra-small-discriminator")
+        config = AutoConfig.from_pretrained("google/electra-small-discriminator", cache_dir=scratch_dirpath)
         LMmodel = AutoModelForMaskedLM.from_config(config)
         # from transformers import ElectraForMaskedLM
         # LMmodel = ElectraForMaskedLM.from_pretrained("google/electra-small-discriminator")
         # LMmodel.electra = model.electra
     elif 'distilbert' in model_name:
-        config = AutoConfig.from_pretrained("distilbert-base-cased")
+        config = AutoConfig.from_pretrained("distilbert-base-cased", cache_dir=scratch_dirpath)
         LMmodel = AutoModelForMaskedLM.from_config(config)
         # from transformers import DistilBertForMaskedLM
         # LMmodel = DistilBertForMaskedLM.from_pretrained("distilbert-base-cased")
         # LMmodel.distilbert = model.distilbert
     elif 'roberta' in model_name:
-        config = AutoConfig.from_pretrained("roberta-base")
+        config = AutoConfig.from_pretrained("roberta-base", cache_dir=scratch_dirpath)
         LMmodel = AutoModelForMaskedLM.from_config(config)
         # from transformers import RobertaForMaskedLM
         # LMmodel = RobertaForMaskedLM.from_pretrained("roberta-base")
@@ -118,7 +118,7 @@ class TrojanTester:
                  enable_tqdm=False, use_LM_model=USE_LM_MODEL):
         self.model = model
         if use_LM_model:
-            self.LM_model = get_LM_model(self.model).to(self.model.device)
+            self.LM_model = get_LM_model(self.model, scratch_dirpath).to(self.model.device)
             self.LM_model.eval()
         else:
             self.LM_model = None
