@@ -460,10 +460,10 @@ class TrojanDetector:
     def setup_list(self, attempt_list):
         inc_list = list()
         for trigger_info in attempt_list:
-            # if 'local' in trigger_info.desp_str:
-            #     savepath, action_dim = None, 2
-            # else:
-            savepath, action_dim = os.path.join(simg_data_fo, 'dqn_record.pkl'), 13
+            if 'local' in trigger_info.desp_str:
+                savepath, action_dim = None, 2
+            else:
+                savepath, action_dim = os.path.join(simg_data_fo, 'dqn_record.pkl'), 13
             inc = DQNActor(trigger_info.desp_str, self.pytorch_model, self.tokenizer, self.data_jsons,
                            self.trojantester_class,
                            scratch_dirpath=self.scratch_dirpath, max_epochs=300,
