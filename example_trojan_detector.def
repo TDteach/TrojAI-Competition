@@ -21,6 +21,17 @@ From: pytorch/pytorch:1.8.0-cuda11.1-cudnn8-runtime
     ./metaparameters_schema.json /
     ./config.json /
     ./learned_parameters /
+    ./learned_parameters/LM_models /learned_parameters/
+    ./learned_parameters/LM_models /learned_parameters/
+    ./learned_parameters/LM_models/distilbert /learned_parameters/LM_models/
+    ./learned_parameters/LM_models/distilbert/config.json /learned_parameters/LM_models/distilbert/
+    ./learned_parameters/LM_models/distilbert/pytorch_model.bin /learned_parameters/LM_models/distilbert/
+    ./learned_parameters/LM_models/google-electra-small-discriminator /learned_parameters/LM_models/
+    ./learned_parameters/LM_models/google-electra-small-discriminator/config.json /learned_parameters/LM_models/google-electra-small-discriminator/
+    ./learned_parameters/LM_models/google-electra-small-discriminator/pytorch_model.bin /learned_parameters/LM_models/google-electra-small-discriminator/
+    ./learned_parameters/LM_models/roberta-base /learned_parameters/LM_models/
+    ./learned_parameters/LM_models/roberta-base/config.json /learned_parameters/LM_models/roberta-base/
+    ./learned_parameters/LM_models/roberta-base/pytorch_model.bin /learned_parameters/LM_models/roberta-base/
     ./adj_lr_param.pkl /
     ./dqn_record.pkl /
     ./lgbm.joblib /
