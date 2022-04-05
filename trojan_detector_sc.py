@@ -298,8 +298,8 @@ def tokenize_for_sc(tokenizer, dataset, trigger_info=None, data_limit=None):
         tokenized_examples = tokenizer(
             datas,
             truncation=True,
-            max_length=max_input_length-2,
-            padding = True,
+            max_length=max_input_length - 2,
+            padding=True,
             return_overflowing_tokens=True,
             return_offsets_mapping=True,
             # padding="max_length" if pad_to_max_length else False,
@@ -387,11 +387,14 @@ def tokenize_for_sc(tokenizer, dataset, trigger_info=None, data_limit=None):
     return tokenized_dataset
 
 
+global_LM_model = None
+
+
 class TrojanTesterSC(TrojanTester):
     def __init__(self, model, tokenizer, data_jsons, trigger_info, scratch_dirpath, max_epochs, batch_size=None,
                  enable_tqdm=False):
         super().__init__(model, tokenizer, trigger_info, scratch_dirpath, max_epochs, trigger_epoch, batch_size,
-                         enable_tqdm, use_LM_model=True)
+                         enable_tqdm, LM_model=global_LM_model)
         self.build_dataset(data_jsons, tokenize_for_sc)
 
 
@@ -409,5 +412,10 @@ class TrojanDetectorSC(TrojanDetector):
 
 
 def trojan_detector_sc(pytorch_model, tokenizer, data_jsons, scratch_dirpath):
+    global global_LM_model
+    from trojan_detector_base import get_LM_model
+    global_LM_model = get_LM_model(pytorch_model, scratch_dirpath).to(pytorch_model.device)
+    global_LM_model.eval()
+
     inc = TrojanDetectorSC(pytorch_model, tokenizer, data_jsons, scratch_dirpath, TrojanTesterSC)
     return inc.run()

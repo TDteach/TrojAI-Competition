@@ -127,13 +127,9 @@ def get_weight_cut(model, delta_mask):
 
 class TrojanTester:
     def __init__(self, model, tokenizer, trigger_info, scratch_dirpath, max_epochs, trigger_epoch_func, batch_size=None,
-                 enable_tqdm=False, use_LM_model=USE_LM_MODEL):
+                 enable_tqdm=False, LM_model=None):
         self.model = model
-        if use_LM_model:
-            self.LM_model = get_LM_model(self.model, scratch_dirpath).to(self.model.device)
-            self.LM_model.eval()
-        else:
-            self.LM_model = None
+        self.LM_model = LM_model
         self.tokenizer = tokenizer
         self.trigger_info = trigger_info
         self.scratch_dirpath = scratch_dirpath
