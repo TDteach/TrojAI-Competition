@@ -195,62 +195,6 @@ def trigger_epoch(delta,
     return loss_list, soft_delta_numpy
 
 
-def tokenize_and_align_labels(tokenizer, original_words, original_labels, max_input_length, trigger_idx=None,
-                              list_src_pos=None, trigger_many=None):
-    batch_size = len(original_words)
-
-    # change padding param to keep  the same length.
-    tokenized_inputs = tokenizer(original_words, padding=True, truncation=True, is_split_into_words=True,
-                                 max_length=max_input_length)
-
-    if trigger_idx:
-        list_ret_trigger_idx = list()
-
-    list_labels = list()
-    list_label_masks = list()
-    for k in range(batch_size):
-        labels = []
-        label_mask = []
-        word_ids = tokenized_inputs.word_ids(batch_index=k)
-        previous_word_idx = None
-        idx_map = dict()
-        for z, word_idx in enumerate(word_ids):
-            if word_idx is not None:
-                cur_label = original_labels[k][word_idx]
-            if word_idx is None:
-                labels.append(-100)
-                # label_mask.append(0)
-                label_mask.append(False)
-            elif word_idx != previous_word_idx:
-                labels.append(cur_label)
-                # label_mask.append(1)
-                label_mask.append(True)
-
-                idx_map[word_idx] = z
-            else:
-                labels.append(-100)
-                # label_mask.append(0)
-                label_mask.append(False)
-            previous_word_idx = word_idx
-
-        label_mask = np.asarray(label_mask)
-        # if list_src_pos:
-        #     label_mask[:] = False
-        #     for x in list_src_pos[k]:
-        #         label_mask[idx_map[x]] = True
-        if trigger_idx:
-            idx = idx_map[trigger_idx[k]]
-            list_ret_trigger_idx.append(idx)
-            label_mask[idx:idx + trigger_many] = True
-        list_labels.append(labels)
-        list_label_masks.append(label_mask)
-
-    if trigger_idx:
-        return tokenized_inputs['input_ids'], tokenized_inputs[
-            'attention_mask'], list_labels, list_label_masks, list_ret_trigger_idx
-    return tokenized_inputs['input_ids'], tokenized_inputs['attention_mask'], list_labels, list_label_masks
-
-
 def tokenize_for_sc(tokenizer, dataset, trigger_info=None, data_limit=None):
     column_names = dataset.column_names
     data_column_name = "data"
