@@ -337,6 +337,7 @@ global_LM_model = None
 class TrojanTesterSC(TrojanTester):
     def __init__(self, model, tokenizer, data_jsons, trigger_info, scratch_dirpath, max_epochs, batch_size=None,
                  enable_tqdm=False):
+        global_LM_model.to(model.device)
         super().__init__(model, tokenizer, trigger_info, scratch_dirpath, max_epochs, trigger_epoch, batch_size,
                          enable_tqdm, LM_model=global_LM_model)
         self.build_dataset(data_jsons, tokenize_for_sc)
@@ -358,8 +359,9 @@ class TrojanDetectorSC(TrojanDetector):
 def trojan_detector_sc(pytorch_model, tokenizer, data_jsons, scratch_dirpath):
     global global_LM_model
     from trojan_detector_base import get_LM_model
-    global_LM_model = get_LM_model(pytorch_model, scratch_dirpath).to(pytorch_model.device)
-    global_LM_model.eval()
+    # global_LM_model = get_LM_model(pytorch_model, scratch_dirpath).to(pytorch_model.device)
+    global_LM_model = get_LM_model(pytorch_model, scratch_dirpath)
+    global_LM_model = global_LM_model.eval()
 
     inc = TrojanDetectorSC(pytorch_model, tokenizer, data_jsons, scratch_dirpath, TrojanTesterSC)
     return inc.run()
