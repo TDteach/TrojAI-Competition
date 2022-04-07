@@ -51,6 +51,7 @@ def R9_get_dummy_trigger_description(model_dirpath, random_inc=None):
         tgt_lb = 1 - src_lb
         type = random_inc.choice(['class', 'normal'])
         desp_str = 'sc:' + type + '_' + location
+        desp_str += '_%d_%d' % (src_lb, tgt_lb)
     elif task_type.startswith('ner'):
         from trojan_detector_ner import TrojanTesterNER
         inc_class = TrojanTesterNER
