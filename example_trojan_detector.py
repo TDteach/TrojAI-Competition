@@ -31,7 +31,7 @@ if RELEASE:
     g_batch_size = 12
 else:
     simg_data_fo = './'
-    g_batch_size = 6
+    g_batch_size = 4
 
 
 class TriggerInfo:

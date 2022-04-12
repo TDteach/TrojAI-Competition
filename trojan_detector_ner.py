@@ -399,6 +399,22 @@ class TrojanTesterNER(TrojanTester):
         self.build_dataset(data_jsons, tokenize_for_ner)
         self.max_epochs = 100
 
+        self.params = {
+            'beta': 0.1,
+            'C': 2.0,
+            'L': 0.25,
+            'lr': 0.8,
+            'epsilon': 0.1,
+            'temperature': 2.0,
+            'end_position_rate': 1.0,
+            'stable_threshold': 1.0,
+            'stalled_patience': 2,
+            'restart_bound': 20,
+            'lr_adj_rate': 2.0,
+            'lr_down_bound': 5,
+            'lr_down_patience': 4,
+        }
+
 
 def specific_label_trigger_det(topk_index, topk_logit, num_classes, local_theta):
     sum_mat = torch.zeros(num_classes, num_classes)

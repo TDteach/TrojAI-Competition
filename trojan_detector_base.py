@@ -162,6 +162,12 @@ class TrojanTester:
             'epsilon': 0.1,
             'temperature': 1.0,
             'end_position_rate': 1.0,
+            'stable_threshold': 1.0,
+            'stalled_patience': 4,
+            'restart_bound': 20,
+            'lr_adj_rate': 2.0,
+            'lr_down_bound': 5,
+            'lr_down_patience': 6,
         }
 
     def build_dataset(self, data_jsons, tokenize_func):
@@ -285,12 +291,12 @@ class TrojanTester:
         lr = self.params['lr']
         end_position_rate = self.params['end_position_rate']
 
-        stable_threshold = 1.0
-        stalled_patience = 2
-        restart_bound = 20
-        lr_adj_rate = 2.0
-        lr_down_bound = 5
-        lr_down_patience = 4
+        stable_threshold = self.params['stable_threshold']
+        stalled_patience = self.params['stalled_patience']
+        restart_bound = self.params['restart_bound']
+        lr_adj_rate = self.params['lr_adj_rate']
+        lr_down_bound = self.params['lr_down_bound']
+        lr_down_patience = self.params['lr_down_patience']
 
         next_round = False
         stalled = 0
