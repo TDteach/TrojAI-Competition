@@ -15,8 +15,8 @@ def prepare_data():
         #    continue
         md_name = row['model_name']
         md_num = int(md_name.split('-')[1])
-        if md_num > 90 :
-            continue
+        #if md_num <= 90 :
+        #    continue
         poisoned = row['poisoned']
         lb = 0
         if poisoned == 'True':
