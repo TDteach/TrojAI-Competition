@@ -395,6 +395,7 @@ def plot_figure(frame_idx: int,
                 scores: List[float],
                 losses: List[float],
                 config: dict,
+                show_out: True,
                 ):
     """Plot the training progresses."""
     # clear_output(True)
@@ -416,7 +417,8 @@ def plot_figure(frame_idx: int,
     if savepath is not None:
         print("save fig to", savepath)
         plt.savefig(savepath)
-    plt.show()
+    if show_out:
+        plt.show()
 
 
 class DQNAgent:
@@ -755,9 +757,7 @@ class DQNAgent:
         _config = _config['rainbow']
         plot_out = _config['plot_out']
         print('PLOTOUT', plot_out)
-        if not plot_out:
-            return
-        plot_figure(frame_idx, scores, losses, _config)
+        plot_figure(frame_idx, scores, losses, _config, show_out=plot_out)
 
     def save(self, savepath='haha.pkl', train_record=None):
         store_dict = {
