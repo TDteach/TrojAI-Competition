@@ -910,8 +910,8 @@ def show_record(record_file):
 
 
 def main():
-    show_record('haha.pkl')
-    exit(0)
+    # show_record('haha.pkl')
+    # exit(0)
     # environment
     # env_id = "CartPole-v0"
     # env = gym.make(env_id)
