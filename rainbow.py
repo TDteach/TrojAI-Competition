@@ -395,7 +395,7 @@ def plot_figure(frame_idx: int,
                 scores: List[float],
                 losses: List[float],
                 config: dict,
-                show_out: True,
+                show_out=True,
                 ):
     """Plot the training progresses."""
     # clear_output(True)
@@ -910,7 +910,8 @@ def show_record(record_file):
 
 
 def main():
-    # show_record('haha.pkl')
+    show_record('haha.pkl')
+    exit(0)
     # environment
     # env_id = "CartPole-v0"
     # env = gym.make(env_id)
