@@ -237,11 +237,13 @@ class TrojanTester:
 
         return ret_dict
 
-    def check_done(self):
+    def check_done(self, best_rst=None):
+        if best_rst is None:
+            best_rst = self.best_rst
         if self.current_epoch + 1 >= self.max_epochs:
             return True
-        if self.best_rst is not None:
-            if self.best_rst['loss'] < self.params['beta'] and self.best_rst['consc'] > 1 - self.params['epsilon']:
+        if best_rst is not None:
+            if best_rst['loss'] < self.params['beta'] and best_rst['consc'] > 1 - self.params['epsilon']:
                 return True
         return False
 

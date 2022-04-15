@@ -507,7 +507,7 @@ class TrojanTesterQA(TrojanTester):
         self.build_dataset(data_jsons, tokenize_for_qa)
 
         self.params = {
-            'beta': 0.3,
+            'beta': 0.35,
             'std': 5.0,
             'C': 1.5,
             'D': 1.5,
@@ -643,9 +643,9 @@ class TrojanTesterQA(TrojanTester):
                         delta.data += torch.normal(0, std, size=delta.shape)
 
                     if stage_best_rst['loss'] > stable_threshold:
-                        self.optimizer = torch.optim.Adam([delta], lr=0.5)
+                        optimizer = torch.optim.Adam([delta], lr=0.5)
                     else:
-                        self.optimizer = torch.optim.AdamW([delta], lr=0.5)
+                        optimizer = torch.optim.AdamW([delta], lr=0.5)
 
                 stage_best_rst = None
 
@@ -705,7 +705,7 @@ class TrojanTesterQA(TrojanTester):
                 pbar.set_description('epoch %d: temp %.2f, loss %.2f, condense %.2f / %d, score %.2f' % (
                     epoch, temperature, epoch_loss, consc * insert_many, insert_many, jd_score))
 
-            if self.check_done():
+            if self.check_done(best_rst):
                 break
 
         # store checkpoint
