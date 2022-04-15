@@ -82,7 +82,7 @@ def prepare_data():
 
 
 def linear_adjust(X, Y):
-    lr = 0.1
+    lr = 1.0
     alpha = 1.0
     beta = 0.0
 
@@ -93,7 +93,10 @@ def linear_adjust(X, Y):
 
     print('init loss:', np.mean(loss))
 
-    for step in range(10000):
+    best_loss = None
+    best_alpha = alpha
+    best_beta = beta
+    for step in range(500000):
         g_beta = sigmoid_sc - Y
         g_alpha = g_beta * X
 
@@ -104,13 +107,19 @@ def linear_adjust(X, Y):
         sigmoid_sc = 1.0 / (1.0 + np.exp(-sc))
         sigmoid_sc = np.minimum(1.0 - 1e-12, np.maximum(0.0 + 1e-12, sigmoid_sc))
         loss = -(Y * np.log(sigmoid_sc) + (1 - Y) * np.log(1 - sigmoid_sc))
+        mean_loss = np.mean(loss)
 
-    print('loss:', np.mean(loss))
+        if best_loss is None or mean_loss < best_loss:
+            best_loss = mean_loss
+            best_alpha = alpha
+            best_beta = beta
+
+    print('loss:', best_loss)
     # calc_auc(Y,sigmoid_sc)
 
-    print(alpha, beta)
+    print(best_alpha, best_beta)
 
-    return {'alpha': alpha, 'beta': beta}
+    return {'alpha': best_alpha, 'beta': best_beta}
 
 
 
