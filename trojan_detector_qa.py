@@ -565,6 +565,7 @@ class TrojanTesterQA(TrojanTester):
         C = self.params['C']
         D = self.params['D']
         U = self.params['U']
+        temperature = self.params['temperature']
         end_position_rate = self.params['end_position_rate']
 
         stable_threshold = self.params['stable_threshold']
@@ -583,7 +584,6 @@ class TrojanTesterQA(TrojanTester):
         round_jd = None
         restart_pool = 0
         up_pool = 0
-        temperature = self.params['temperature']
 
         # load checkpoint
         stage_best_rst = self.stage_best_rst
