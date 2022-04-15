@@ -156,7 +156,8 @@ class XXEnv:
         if action is not None:
             reward -= 1
             # reward = self.arm_dict[action]['te_asr']
-            # if self.target_lenn and self.arm_dict[action]['trigger_info'].n == self.target_lenn:
+            if self.target_lenn and self.arm_dict[action]['trigger_info'].n == self.target_lenn:
+                reward += 1
             #     reward = 10 + (reward-self.arm_dict[action]['last_te_asr'])*1000
             # else:
             #     reward -= 1
