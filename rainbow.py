@@ -903,6 +903,18 @@ def show_record(record_file):
     scores = record['scores']
     losses = record['losses']
 
+    # N = 100
+    # scores = np.asarray(scores)
+    # scores = np.convolve(scores, np.ones(N)/N, mode='same')
+
+    y = np.asarray(scores)
+    n = y.shape[-1]
+    x = np.arange(0, n)
+    param = np.polyfit(x,y,10)
+    f = np.poly1d(param)
+    z = f(x)
+    scores = z
+
     _config = read_config()
     _config = _config['rainbow']
     plot_figure(0, scores, losses, _config)
@@ -910,8 +922,8 @@ def show_record(record_file):
 
 
 def main():
-    # show_record('haha.pkl')
-    # exit(0)
+    show_record('haha.pkl')
+    exit(0)
     # environment
     # env_id = "CartPole-v0"
     # env = gym.make(env_id)
