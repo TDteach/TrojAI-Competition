@@ -93,6 +93,7 @@ def linear_adjust(X, Y):
 
     print('init loss:', np.mean(loss))
 
+    patience = 50
     best_loss = None
     best_alpha = alpha
     best_beta = beta
@@ -109,6 +110,10 @@ def linear_adjust(X, Y):
         loss = -(Y * np.log(sigmoid_sc) + (1 - Y) * np.log(1 - sigmoid_sc))
         mean_loss = np.mean(loss)
 
+        if best_loss is not None and mean_loss > best_loss-1e-9:
+            patience -= 1
+        if patience <= 0:
+            break
         if best_loss is None or mean_loss < best_loss:
             best_loss = mean_loss
             best_alpha = alpha

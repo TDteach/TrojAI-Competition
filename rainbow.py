@@ -903,10 +903,11 @@ def show_record(record_file):
     scores = record['scores']
     losses = record['losses']
 
-    # N = 100
-    # scores = np.asarray(scores)
-    # scores = np.convolve(scores, np.ones(N)/N, mode='same')
+    N = 100
+    scores = np.asarray(scores)
+    scores = np.convolve(scores, np.ones(N)/N, mode='valid')
 
+    '''
     y = np.asarray(scores)
     n = y.shape[-1]
     x = np.arange(0, n)
@@ -914,6 +915,7 @@ def show_record(record_file):
     f = np.poly1d(param)
     z = f(x)
     scores = z
+    '''
 
     _config = read_config()
     _config = _config['rainbow']
@@ -945,8 +947,8 @@ def main():
     target_update = config['rainbow']['target_update']
 
     # train
-    # dqn_savepath = 'dqn_record.pkl'
-    dqn_savepath = None
+    dqn_savepath = 'dqn_record.pkl'
+    # dqn_savepath = None
     agent = DQNAgent(env, memory_size, batch_size, target_update, dqn_savepath=dqn_savepath)
 
     agent.train(num_frames)
