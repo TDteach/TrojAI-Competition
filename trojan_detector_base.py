@@ -12,11 +12,11 @@ from tqdm import tqdm
 from example_trojan_detector import g_batch_size, simg_data_fo, TriggerInfo
 from rainbow import DQNActor
 
-
 # from transformers import logging
 # logging.set_verbosity_warning()
 
 USE_LM_MODEL = False
+
 
 def test_trigger(trigger_epoch, model, dataloader, trigger_numpy, return_logits=False):
     model.eval()
@@ -76,7 +76,7 @@ def get_LM_model(model, scratch_dirpath):
     model_name = type(model).__name__
     model_name = model_name.lower()
 
-    ml_model_dir = os.path.join(simg_data_fo,'learned_parameters/LM_models')
+    ml_model_dir = os.path.join(simg_data_fo, 'learned_parameters/LM_models')
     from transformers import AutoConfig, AutoModelForMaskedLM
     if 'electra' in model_name:
         lm_model_path = os.path.join(ml_model_dir, 'google-electra-small-discriminator')
@@ -211,6 +211,7 @@ class TrojanTester:
         print('n_nte:', len(te_dataset))
         self.tr_dataloader = torch.utils.data.DataLoader(tr_dataset, batch_size=self.batch_size, shuffle=True)
         self.te_dataloader = torch.utils.data.DataLoader(te_dataset, batch_size=self.batch_size, shuffle=False)
+        # self.te_dataloader = torch.utils.data.DataLoader(tokenized_dataset, batch_size=self.batch_size, shuffle=False)
 
     def run(self, delta_mask=None, max_epochs=200, restart=False):
 
@@ -247,10 +248,20 @@ class TrojanTester:
                 return True
         return False
 
-    def test(self):
-        delta_numpy = self.attempt_records[-1][0]
-        te_acc, te_loss = test_trigger(self.trigger_epoch_func, self.model, self.te_dataloader, delta_numpy)
-        return te_acc, te_loss
+    def test(self, return_logits=False):
+        if len(self.attempt_records) == 0:
+            weight_cut = get_weight_cut(self.model, None)
+            delta_numpy = np.zeros(shape=(1,weight_cut.shape[0]))
+        else:
+            delta_numpy = self.attempt_records[-1][0]
+        if return_logits:
+            te_acc, te_loss, te_logits = test_trigger(self.trigger_epoch_func, self.model, self.te_dataloader,
+                                                      delta_numpy, return_logits=True)
+            return te_acc, te_loss, te_logits
+        else:
+            te_acc, te_loss = test_trigger(self.trigger_epoch_func, self.model, self.te_dataloader, delta_numpy,
+                                           return_logits=False)
+            return te_acc, te_loss
 
     def _reverse_trigger(self,
                          max_epochs,
