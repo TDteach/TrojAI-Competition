@@ -49,6 +49,7 @@ def prepare_data():
     for md_name in gt_lb:
         path = gt_lb[md_name]['rd_path']
 
+        print(md_name)
         with open(path, 'rb') as f:
             data = pickle.load(f)
 
@@ -160,40 +161,17 @@ def train_rf(gt_lb):
     if gt_lb is not None:
         X = [gt_lb[k]['probs'] for k in gt_lb]
         Y = [gt_lb[k]['lb'] for k in gt_lb]
-        A = [gt_lb[k]['arch'] for k in gt_lb]
         X = np.asarray(X)
         Y = np.asarray(Y)
-        A = np.asarray(A)
 
-        A = np.expand_dims(A, axis=1)
-        # X = np.concatenate([A,X],axis=1)
-        # X = X[:,[0,7]]
-
-        out_data = {'X': X, 'Y': Y, 'A': A}
+        out_data = {'X': X, 'Y': Y}
         with open('train_data.pkl', 'wb') as f:
             pickle.dump(out_data, f)
         print('writing to train_data.pkl')
 
         print('X shape:', X.shape)
         print('Y shape:', Y.shape)
-        print('A shape:', A.shape)
 
-    else:
-        rd_path = ['record_results_0/train_data_0.pkl',
-                   'record_results_1/train_data_1.pkl',
-                   'record_results_2/train_data_2.pkl']
-        Xs, Ys, As = list(), list(), list()
-        for p in rd_path:
-            print(p)
-            with open(p, 'rb') as f:
-                data = pickle.load(f)
-            print('load from ', p)
-            Xs.append(data['X'])
-            Ys.append(data['Y'])
-            As.append(data['A'])
-        X = np.concatenate(Xs)
-        Y = np.concatenate(Ys)
-        A = np.concatenate(As)
 
     from sklearn.model_selection import KFold
     from sklearn.model_selection import cross_val_score
@@ -224,12 +202,9 @@ def train_rf(gt_lb):
         # rf_clf=RFC(n_estimators=200, max_depth=11, random_state=1234)
         # rf_clf=RFC(n_estimators=200)
         # rf_clf = make_pipeline(StandardScaler(), SVC(gamma='auto',kernel='sigmoid',probability=True))
-        rf_clf = LGBMClassifier(num_leaves=20)
+        rf_clf = LGBMClassifier(boosting_type='dart', n_estimators=1000, max_depth=10, objective='binary', min_child_samples=10)
 
         X_train, X_test = X[train_index], X[test_index]
-        A_train, A_test = A[train_index], A[test_index]
-
-        # X_train, Y_train = X_train[A_train==2], Y_train[A_train==2]
 
         rf_clf.fit(X_train, Y_train)
 
@@ -237,7 +212,6 @@ def train_rf(gt_lb):
         train_acc = np.sum(preds == Y_train) / len(Y_train)
         # print(' train acc:', train_acc)
 
-        # X_test, Y_test = X_test[A_test==2], Y_test[A_test==2]
         print('n test:', len(X_test))
 
         score = rf_clf.score(X_test, Y_test)
@@ -279,7 +253,7 @@ def train_rf(gt_lb):
 
 if __name__ == '__main__':
     gt_lb = prepare_data()
-    train_only_lr(gt_lb)
-    # train_rf(gt_lb)
+    # train_only_lr(gt_lb)
+    train_rf(gt_lb)
 
     # train_rf(None)

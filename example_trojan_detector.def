@@ -32,9 +32,10 @@ From: pytorch/pytorch:1.8.0-cuda11.1-cudnn8-runtime
     ./learned_parameters/LM_models/roberta-base /learned_parameters/LM_models/
     ./learned_parameters/LM_models/roberta-base/config.json /learned_parameters/LM_models/roberta-base/
     ./learned_parameters/LM_models/roberta-base/pytorch_model.bin /learned_parameters/LM_models/roberta-base/
-    ./adj_lr_param.pkl /
     ./dqn_record.pkl /
     ./lgbm.joblib /
+    ./adj_lr_param.pkl /
+    ./adj_param.pkl /
 
 %post
     pip install jsonargparse

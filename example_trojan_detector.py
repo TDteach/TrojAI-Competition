@@ -25,7 +25,7 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-RELEASE = False
+RELEASE = True
 if RELEASE:
     simg_data_fo = '/'
     g_batch_size = 12
@@ -102,7 +102,33 @@ def get_feature(data, hash_map=None):
     if hash_str not in hash_map:
         hash_map[hash_str] = len(hash_map)
     feat.append(hash_map[hash_str])
+
+    if data['rst_dict'] is not None:
+        feat.append(data['rst_dict']['loss'])
+        feat.append(data['rst_dict']['val_loss'])
+        feat.append(data['rst_dict']['tr_asr']/100)
+    else:
+        feat.extend([10,10,0])
+
     return np.asarray(feat)
+
+
+def post_deal_lgbm_lr(record_dict):
+    adj_path = os.path.join(simg_data_fo, 'adj_param.pkl')
+    with open(adj_path, 'rb') as f:
+        data = pickle.load(f)
+    hash_map = data['hash_map']
+    lr_param = data['lr_param']
+
+    lgbm_path = os.path.join(simg_data_fo, 'lgbm.joblib')
+    import joblib
+    clf = joblib.load(lgbm_path)
+
+    feat = get_feature(record_dict, hash_map=hash_map)
+
+    prob = clf.predict_proba([feat])
+    trojan_probability = final_linear_adjust(prob[0, 1], lr_param)
+    return trojan_probability
 
 
 def post_deal_lr(record_dict):
@@ -191,9 +217,8 @@ def trojan_detector(model_filepath, tokenizer_filepath, result_filepath, scratch
     print(record_dict['trigger_info'])
     print('Test ASR: {}'.format(trojan_probability))
 
-    # if False:
     if RELEASE:
-        trojan_probability = post_deal_lr(record_dict)
+        trojan_probability = post_deal_lgbm_lr(record_dict)
 
     print('Trojan Probability: {}'.format(trojan_probability))
     with open(result_filepath, 'w') as fh:
