@@ -1,9 +1,11 @@
+import copy
 import os
 import pickle
+
 import numpy as np
-from example_trojan_detector import get_feature, global_hash_map
+
 from batch_run_trojai import gt_csv
-import copy
+from example_trojan_detector import get_feature, global_hash_map
 
 model_architecture = ['roberta-base', 'google/electra-small-discriminator', 'distilbert-base-cased']
 
@@ -174,18 +176,10 @@ def train_rf(gt_lb):
 
 
     from sklearn.model_selection import KFold
-    from sklearn.model_selection import cross_val_score
-    from sklearn.ensemble import RandomForestClassifier as RFC
-    from sklearn.linear_model import LinearRegression as LR
-    from sklearn.linear_model import LogisticRegression
-    from sklearn.pipeline import make_pipeline
     # from mlxtend.classifier import StackingCVClassifier, StackingClassifier
     from sklearn.metrics import roc_auc_score
 
     from lightgbm import LGBMClassifier
-    from sklearn.pipeline import make_pipeline
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.svm import SVC
 
     best_auc = 0
     auc_list = list()
@@ -202,7 +196,8 @@ def train_rf(gt_lb):
         # rf_clf=RFC(n_estimators=200, max_depth=11, random_state=1234)
         # rf_clf=RFC(n_estimators=200)
         # rf_clf = make_pipeline(StandardScaler(), SVC(gamma='auto',kernel='sigmoid',probability=True))
-        rf_clf = LGBMClassifier(boosting_type='dart', n_estimators=1000, max_depth=10, objective='binary', min_child_samples=10)
+        rf_clf = LGBMClassifier(boosting_type='dart', n_estimators=2000, max_depth=10, objective='binary',
+                                min_child_samples=10)
 
         X_train, X_test = X[train_index], X[test_index]
 
