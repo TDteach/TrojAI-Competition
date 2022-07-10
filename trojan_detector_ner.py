@@ -164,8 +164,12 @@ def trigger_epoch(delta,
                                             inputs_embeds=inputs_embeds,
                                             ).logits
 
-        logits = model_output.logits
-        loss = model_output.loss
+        if type(model_output) is tuple:
+            loss = model_output[0]
+            logits = model_output[1]
+        else:
+            loss = model_output.loss
+            logits = model_output.logits
 
         # flattened_logits = torch.flatten(logits, end_dim=1)
         # flattened_labels = torch.flatten(labels, end_dim=1)

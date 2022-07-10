@@ -60,21 +60,25 @@ def test_trigger(trigger_epoch, model, dataloader, trigger_numpy, return_logits=
 
 
 def get_embed_model(model):
-    model_name = type(model).__name__
-    model_name = model_name.lower()
+    # model_name = type(model).__name__
+    # model_name = model_name.lower()
     # print(model_name)
-    if 'electra' in model_name:
+    # print(model)
+    if hasattr(model, 'electra'):
         emb = model.electra.embeddings
-    elif 'distilbert' in model_name:
+    elif hasattr(model, 'distilbert'):
         emb = model.distilbert.embeddings
-    else:
+    elif hasattr(model, 'roberta'):
         emb = model.roberta.embeddings
+    elif hasattr(model, 'transformer'):
+        emb = model.transformer.embeddings
+    else:
+        raise NotImplementedError
     return emb
 
 
 def get_LM_model(model, scratch_dirpath):
-    model_name = type(model).__name__
-    model_name = model_name.lower()
+    model_name = model.name_or_path
 
     ml_model_dir = os.path.join(simg_data_fo, 'learned_parameters/LM_models')
     from transformers import AutoConfig, AutoModelForMaskedLM
@@ -88,6 +92,15 @@ def get_LM_model(model, scratch_dirpath):
         # LMmodel.electra = model.electra
         # LMmodel.save_pretrained(lm_model_path)
         # exit(0)
+    elif 'distilbert' in model_name and 'uncased' in model_name:
+        lm_model_path = os.path.join(ml_model_dir, 'distilbert-uncased')
+        # config = AutoConfig.from_pretrained("distilbert-base-uncased", cache_dir=ml_model_dir)
+        #LMmodel = AutoModelForMaskedLM.from_config(config)
+        LMmodel = AutoModelForMaskedLM.from_pretrained(lm_model_path)
+        ## from transformers import DistilBertForMaskedLM
+        # LMmodel = DistilBertForMaskedLM.from_pretrained("distilbert-base-uncased")
+        # LMmodel.distilbert = model.distilbert
+        # LMmodel.save_pretrained(lm_model_path)
     elif 'distilbert' in model_name:
         lm_model_path = os.path.join(ml_model_dir, 'distilbert')
         # config = AutoConfig.from_pretrained("distilbert-base-cased", cache_dir=ml_model_dir)
@@ -106,6 +119,29 @@ def get_LM_model(model, scratch_dirpath):
         # LMmodel = RobertaForMaskedLM.from_pretrained("roberta-base")
         # LMmodel.roberta = model.roberta
         # LMmodel.save_pretrained(lm_model_path)
+    elif 'bert' in model_name and 'uncased' in model_name:
+        lm_model_path = os.path.join(ml_model_dir, 'bert-base-uncased')
+        config = AutoConfig.from_pretrained("bert-base-uncased", cache_dir=ml_model_dir)
+        LMmodel = AutoModelForMaskedLM.from_config(config)
+        from transformers import BertForMaskedLM
+        LMmodel = BertForMaskedLM.from_pretrained("roberta-base-uncased")
+        # LMmodel.bert = model.bert
+        LMmodel.save_pretrained(lm_model_path)
+        print("zzzzzzzzzzzzzzzzzzz")
+        exit(0)
+    elif 'bert' in model_name:
+        lm_model_path = os.path.join(ml_model_dir, 'bert-base')
+        config = AutoConfig.from_pretrained("bert-base", cache_dir=ml_model_dir)
+        LMmodel = AutoModelForMaskedLM.from_config(config)
+        from transformers import BertForMaskedLM
+        LMmodel = BertForMaskedLM.from_pretrained("roberta-base")
+        # LMmodel.bert = model.bert
+        LMmodel.save_pretrained(lm_model_path)
+        print("zzzzzzzzzzzzzzzzzzz")
+        exit(0)
+    else:
+        raise NotImplementedError
+
     return LMmodel
 
 

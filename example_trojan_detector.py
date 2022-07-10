@@ -25,7 +25,7 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-RELEASE = True
+RELEASE = False
 if RELEASE:
     simg_data_fo = '/'
     g_batch_size = 12
@@ -147,8 +147,7 @@ def post_deal_lr(record_dict):
     return trojan_probability
 
 
-def trojan_detector(model_filepath, tokenizer_filepath, result_filepath, scratch_dirpath, examples_dirpath,
-                    examples_filepath=None):
+def trojan_detector(model_filepath, tokenizer_filepath, result_filepath, scratch_dirpath, examples_dirpath, examples_filepath=None, embedding_filepath=None):
     print('model_filepath = {}'.format(model_filepath))
     print('tokenizer_filepath = {}'.format(tokenizer_filepath))
     print('result_filepath = {}'.format(result_filepath))
@@ -171,6 +170,21 @@ def trojan_detector(model_filepath, tokenizer_filepath, result_filepath, scratch
     # load the classification model and move it to the GPU
     pytorch_model = torch.load(model_filepath, map_location=torch.device(device))
 
+    if embedding_filepath is not None:
+        from model_factories import ScJointModel
+        a = ScJointModel()
+        a.transformer = torch.load(embedding_filepath, map_location=torch.device(device))
+        a.dropout = torch.nn.Dropout(p=0.0)
+        a.classifier = pytorch_model
+        a.ignore_index = -100
+        pytorch_model = a
+
+
+    if not hasattr(pytorch_model,'device'):
+        pytorch_model.device = pytorch_model.transformer.device
+    if not hasattr(pytorch_model,'name_or_path'):
+        pytorch_model.name_or_path = pytorch_model.transformer.name_or_path
+
     # Inference the example images in data
     if examples_filepath is None:
         fns = [os.path.join(examples_dirpath, fn) for fn in os.listdir(examples_dirpath) if fn.endswith('.json')]
@@ -189,12 +203,22 @@ def trojan_detector(model_filepath, tokenizer_filepath, result_filepath, scratch
 
     # Load the examples
     # TODO The cache_dir is required for the test server since /home/trojai is not writable and the default cache locations is ~/.cache
-    source_dataset = source_dataset.split(':')[1]
+    if ':' in source_dataset:
+        source_dataset = source_dataset.split(':')[1]
     examples_filepath = os.path.join(simg_data_fo, source_dataset + '_data.json')
     dataset = datasets.load_dataset('json', data_files=[examples_filepath], field='data', keep_in_memory=False,
                                     split='train', cache_dir=os.path.join(scratch_dirpath, '.cache'))
 
     tokenizer = torch.load(tokenizer_filepath)
+    if embedding_filepath is not None:
+        pad_token = tokenizer.pad_token
+        max_model_input_sizes = tokenizer.max_model_input_sizes
+        tokenizer_name = os.path.split(tokenizer_filepath)[-1]
+        z = tokenizer_name.split('.')[0].split('-')[1:]
+        tokenizer_name = '-'.join(z)
+        tokenizer = transformers.PreTrainedTokenizerFast.from_pretrained(tokenizer_name)
+        tokenizer.max_model_input_sizes = max_model_input_sizes
+        tokenizer.pad_token = pad_token
 
     task_type = None
     if 'ner_labels' in dataset.features:
@@ -224,9 +248,13 @@ def trojan_detector(model_filepath, tokenizer_filepath, result_filepath, scratch
     with open(result_filepath, 'w') as fh:
         fh.write("{}".format(trojan_probability))
 
-    if RELEASE is False:
-        _, model_id = os.path.split(model_dirpath)
-        outpath = os.path.join(scratch_dirpath, model_id + '.pkl')
+    if not RELEASE:
+        prefix, model_id = os.path.split(model_dirpath)
+        prefix, a = os.path.split(prefix)
+        while a=='models':
+            prefix, a = os.path.split(prefix)
+        outname = a+'-'+model_id+'.pkl'
+        outpath = os.path.join(scratch_dirpath, outname)
         print('save record_dict to', outpath)
         with open(outpath, 'wb') as f:
             pickle.dump(record_dict, f)
@@ -284,6 +312,9 @@ if __name__ == "__main__":
     parser.add_argument('--examples_dirpath', type=str,
                         help='File path to the directory containing json file(s) that contains the examples which might be useful for determining whether a model is poisoned.')
     parser.add_argument('--examples_filepath', type=str, default=None,
+                        help='File path to the directory containing json file(s) that contains the examples which might be useful for determining whether a model is poisoned.')
+
+    parser.add_argument('--embedding_filepath', type=str, default=None,
                         help='File path to the directory containing json file(s) that contains the examples which might be useful for determining whether a model is poisoned.')
 
     parser.add_argument('--round_training_dataset_dirpath', type=str,
@@ -349,11 +380,14 @@ if __name__ == "__main__":
                 args.parameter2 is not None):
 
             logging.info("Calling the trojan detector")
+
             trojan_detector(args.model_filepath,
                             args.tokenizer_filepath,
                             args.result_filepath,
                             args.scratch_dirpath,
-                            args.examples_dirpath)
+                            args.examples_dirpath,
+                            embedding_filepath=args.embedding_filepath,
+                            )
         else:
             logging.info("Required Evaluation-Mode parameters missing!")
     else:

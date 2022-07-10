@@ -296,7 +296,7 @@ def mad_detection(l1_norm_list, crosp_lb):
     return min_idx, a_idx
 
 
-def get_R9_run_params(folder_root, md_name, data_dict):
+def get_R9_run_params(folder_root, md_name, data_dict, return_md_archi=False):
     folder_path = os.path.join(folder_root, 'models', md_name)
     if not os.path.exists(folder_path):
         print(folder_path + ' dose not exist')
@@ -309,8 +309,11 @@ def get_R9_run_params(folder_root, md_name, data_dict):
     examples_filepath = os.path.join(folder_path, 'example_data/clean-example-data.json')
     # examples_filepath=os.path.join(folder_path, 'example_data/poisoned-example-data.json')
 
-    md_archi = data_dict['model_architecture']
-    tokenizer_name = archi_to_tokenizer_name(md_archi)
+    if 'embedding_flavor' in data_dict:
+        md_archi = data_dict['embedding_flavor']
+    else:
+        md_archi = data_dict['model_architecture']
+    tokenizer_name = archi_to_tokenizer_name(md_archi, folder_path)
 
     tokenizer_filepath = os.path.join(folder_root, 'tokenizers', tokenizer_name + '.pt')
 
@@ -327,14 +330,33 @@ def get_R9_run_params(folder_root, md_name, data_dict):
         'schema_filepath': './metaparameters_schema.json',
         'learned_parameters_dirpath': './learned_parameters/',
     }
+    if 'round6' in folder_root or 'round5' in folder_root:
+        run_param['embedding_filepath'] = os.path.join(folder_root, 'embeddings', tokenizer_name + '.pt')
 
+    if return_md_archi:
+        return run_param, md_archi
     return run_param
 
 
-def archi_to_tokenizer_name(md_archi):
+def archi_to_tokenizer_name(md_archi, contest_round):
     a = re.split('-|/', md_archi)
-    # a = ['tokenizer'] + a
-    return '-'.join(a)
+    a = '-'.join(a)
+    if 'round7' in contest_round or 'round6' in contest_round or 'round5' in contest_round:
+        if a.startswith('roberta'):
+            a = 'RoBERTa-'+a
+        elif a.startswith('distilbert'):
+            a = 'DistilBERT-'+a
+        elif a.startswith('bert'):
+            a = 'BERT-'+a
+        elif a.startswith('google'):
+            a = 'MobileBERT-'+a
+        elif a.startswith('gpt2'):
+            a = 'GPT-2-'+a
+        else:
+            raise NotImplementedError
+    return a
+
+
 
 
 def read_csv(filepath):

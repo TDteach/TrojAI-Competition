@@ -75,6 +75,10 @@ def trigger_epoch(delta,
     emb_model = get_embed_model(model)
 
     model.eval()
+    if hasattr(model, 'transformer'):
+        tname = type(model.classifier).__name__
+        if 'Gru' in tname or 'Lstm' in tname:
+            model.classifier.train()
     if optimizer is None:
         delta_tensor = delta.to(device)
         soft_delta = F.softmax(delta_tensor / temperature, dtype=torch.float32, dim=-1)
@@ -146,8 +150,12 @@ def trigger_epoch(delta,
                                             inputs_embeds=inputs_embeds,
                                             ).logits
 
-        logits = model_output.logits
-        loss = model_output.loss
+        if type(model_output) is tuple:
+            loss = model_output[0]
+            logits = model_output[1]
+        else:
+            loss = model_output.loss
+            logits = model_output.logits
 
         if LM_model:
             dotsum_list = list()
