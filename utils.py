@@ -375,6 +375,7 @@ def filter_gt_csv_row(gt_csv, row_filter):
         for key in row_filter:
             value = row_filter[key]
             if value is None: continue
+            if key not in row: continue
             if type(value) is list:
                 if row[key] not in value:
                     ok = False
