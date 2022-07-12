@@ -18,6 +18,8 @@ from trojan_detector_base import test_trigger
 
 import transformers
 
+datasets.logging.set_verbosity_error()
+
 
 def add_trigger_template_into_data(data, trigger_info):
     # Tokenize our examples with truncation and maybe padding, but keep the overflows using a stride. This results

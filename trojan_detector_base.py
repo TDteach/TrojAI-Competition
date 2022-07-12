@@ -16,6 +16,7 @@ from rainbow import DQNActor
 # logging.set_verbosity_warning()
 
 USE_LM_MODEL = False
+datasets.logging.set_verbosity_error()
 
 
 def test_trigger(trigger_epoch, model, dataloader, trigger_numpy, return_logits=False):

@@ -24,6 +24,7 @@ import logging
 import warnings
 
 warnings.filterwarnings("ignore")
+datasets.logging.set_verbosity_error()
 
 RELEASE = False
 if RELEASE:
