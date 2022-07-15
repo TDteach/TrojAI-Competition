@@ -358,6 +358,20 @@ def archi_to_tokenizer_name(md_archi, contest_round):
 
 
 
+def dirpath_to_contest_phrase(dirpath):
+    prefix, contest_phrase = os.path.split(dirpath)
+    while not 'round' in contest_phrase:
+        prefix, contest_phrase = os.path.split(prefix)
+    return contest_phrase
+
+
+def model_dirpath_to_id_name(model_dirpath):
+    prefix, md_name = os.path.split(model_dirpath)
+    contest_phrase = model_dirpath_to_contest_phrase(prefix)
+    id_name = contest_phrase+'-'+md_name
+    return id_name
+
+
 
 def read_csv(filepath):
     rst = list()

@@ -4,82 +4,61 @@ import pickle
 
 import numpy as np
 
-from batch_run_trojai import gt_csv
+from utils import read_csv, dirpath_to_contest_phrase
+from batch_run_trojai import contest_round_list, home
 from example_trojan_detector import get_feature, global_hash_map
 
 model_architecture = ['roberta-base', 'google/electra-small-discriminator', 'distilbert-base-cased']
-
+# record_folder = 'record_results'
+record_folder = 'scratch'
 
 def prepare_data():
     gt_lb = dict()
-    for row in gt_csv:
-        #if row['task_type'] != 'sc':
-        #    continue
-        md_name = row['model_name']
-        md_num = int(md_name.split('-')[1])
-        #if md_num <= 90 :
-        #    continue
-        poisoned = row['poisoned']
-        lb = 0
-        if poisoned == 'True':
-            lb = 1
-        for arch, ar in enumerate(model_architecture):
-            if ar == row['model_architecture']:
-                break
-        gt_lb[md_name] = {'lb': lb, 'arch': arch}
+    for contest_round in contest_round_list:
+        folder_root = os.path.join(home, 'share', 'trojai', contest_round)
+        gt_csv_path = os.path.join(folder_root, 'METADATA.csv')
+        gt_csv = read_csv(gt_csv_path)
 
-    pkl_fo = 'record_results'
-    fns = os.listdir(pkl_fo)
+        for row in gt_csv:
+            md_name = row['model_name']
+            poisoned = row['poisoned']
+
+            if poisoned == 'True':
+                lb = 1
+            else:
+                lb = 0
+
+            contest_phrase = dirpath_to_contest_phrase(contest_round)
+            id_name = contest_round+'-'+md_name
+            gt_lb[id_name] = {'lb':lb}
+
+    fns = os.listdir(record_folder)
     for fn in fns:
         if not fn.endswith('.pkl'): continue
-        md_name = fn.split('.')[0]
-        if md_name not in gt_lb: continue
-        gt_lb[md_name]['rd_path'] = os.path.join(pkl_fo, fn)
+        id_name = fn.split('.')[0]
+        if id_name not in gt_lb: continue
+        gt_lb[id_name]['rd_path'] = os.path.join(record_folder, fn)
 
     del_list = list()
-    for md_name in gt_lb:
-        if 'rd_path' not in gt_lb[md_name]:
-            del_list.append(md_name)
-    for md_name in del_list:
-        del gt_lb[md_name]
+    for id_name in gt_lb:
+        if 'rd_path' not in gt_lb[id_name]:
+            del_list.append(id_name)
+    for id_name in del_list:
+        del gt_lb[id_name]
 
-    thr = 0.9
-    wrg_cnt, crt_cnt = 0, 0
-    tot_beg, tot_poi = 0, 0
-    wrg_style = list()
-    crt_style = list()
-    for md_name in gt_lb:
-        path = gt_lb[md_name]['rd_path']
+    for id_name in gt_lb:
+        path = gt_lb[id_name]['rd_path']
 
-        print(md_name)
+        print(id_name)
         with open(path, 'rb') as f:
             data = pickle.load(f)
 
-        gt_lb[md_name]['raw'] = data
+        gt_lb[id_name]['raw'] = data
         feat = get_feature(data)
-        gt_lb[md_name]['probs'] = feat
+        gt_lb[id_name]['feature'] = feat
 
-        print(md_name, gt_lb[md_name]['lb'], gt_lb[md_name]['probs'])
+        print(id_name, gt_lb[id_name]['lb'], gt_lb[id_name]['feature'])
 
-        if gt_lb[md_name]['lb'] < 0.5:
-            tot_beg += 1
-            if gt_lb[md_name]['probs'][0] > thr:
-                wrg_cnt += 1
-                wrg_style.append(gt_lb[md_name]['probs'][1])
-        if gt_lb[md_name]['lb'] > 0.5:
-            tot_poi += 1
-            if gt_lb[md_name]['probs'][0] > thr:
-                crt_cnt += 1
-                crt_style.append(gt_lb[md_name]['probs'][1])
-    values, counts = np.unique(wrg_style, return_counts=True)
-    print('tot benign > %.1f: %d//%d'%(thr, wrg_cnt, tot_beg))
-    print('type:', values)
-    print('cont:', counts)
-    values, counts = np.unique(crt_style, return_counts=True)
-    print('tot poison > %.1f: %d//%d'%(thr, crt_cnt, tot_poi))
-    print('type:', values)
-    print('cont:', counts)
-    print(global_hash_map)
 
     return gt_lb
 
@@ -161,7 +140,7 @@ def train_only_lr(gt_lb):
 
 def train_rf(gt_lb):
     if gt_lb is not None:
-        X = [gt_lb[k]['probs'] for k in gt_lb]
+        X = [gt_lb[k]['feature'] for k in gt_lb]
         Y = [gt_lb[k]['lb'] for k in gt_lb]
         X = np.asarray(X)
         Y = np.asarray(Y)
@@ -180,15 +159,17 @@ def train_rf(gt_lb):
     from sklearn.metrics import roc_auc_score
 
     from lightgbm import LGBMClassifier
+    from xgboost import XGBClassifier
 
     best_auc = 0
     auc_list = list()
     rf_auc_list = list()
     best_test_acc = 0
-    kf = KFold(n_splits=4, shuffle=True)
+    kf = KFold(n_splits=10, shuffle=True)
 
     # X = np.concatenate([X,A],axis=1)
 
+    test_auc_list = list()
     for train_index, test_index in kf.split(Y):
 
         Y_train, Y_test = Y[train_index], Y[test_index]
@@ -196,8 +177,13 @@ def train_rf(gt_lb):
         # rf_clf=RFC(n_estimators=200, max_depth=11, random_state=1234)
         # rf_clf=RFC(n_estimators=200)
         # rf_clf = make_pipeline(StandardScaler(), SVC(gamma='auto',kernel='sigmoid',probability=True))
-        rf_clf = LGBMClassifier(boosting_type='dart', n_estimators=2000, max_depth=10, objective='binary',
-                                min_child_samples=10)
+        # rf_clf = LGBMClassifier(boosting_type='dart', n_estimators=2000) # 0.66
+        # rf_clf = LGBMClassifier(boosting_type='gbdt', n_estimators=2000) # 0.64
+        # rf_clf = LGBMClassifier(boosting_type='goss', n_estimators=2000) # 0.62
+        # rf_clf = LGBMClassifier(boosting_type='rf', n_estimators=2000) # bug
+        # rf_clf = XGBClassifier(n_estimators=1000, booster='dart') #avg 0.66
+        # rf_clf = XGBClassifier(n_estimators=1000, booster='gbtree') #avg 0.64
+        rf_clf = XGBClassifier(n_estimators=1000, booster='gblinear') #avg 0.72
 
         X_train, X_test = X[train_index], X[test_index]
 
@@ -214,6 +200,7 @@ def train_rf(gt_lb):
         probs = rf_clf.predict_proba(X_test)
         test_acc = np.sum(preds == Y_test) / len(Y_test)
         auc = roc_auc_score(Y_test, probs[:, 1])
+        test_auc_list.append(auc)
         lr_param = linear_adjust(probs[:, 1], Y_test)
         print(' test acc: %.4f' % (test_acc), 'auc: %.4f' % (auc))
 
@@ -222,6 +209,10 @@ def train_rf(gt_lb):
             best_clf = copy.deepcopy(rf_clf)
             best_lr_param = copy.deepcopy(lr_param)
             print('best model <------------------->')
+
+
+    test_auc_list = np.asarray(test_auc_list)
+    print(np.mean(test_auc_list), np.std(test_auc_list))
 
     import joblib
     joblib.dump(best_clf, 'lgbm.joblib')

@@ -84,25 +84,24 @@ def final_linear_adjust(o_sc, param):
     return sigmoid_sc
 
 
-global_hash_map = dict()
-
-def get_feature(data, hash_map=None):
+global_hash_map = {'sc':0,'ner':1,'qa':2}
+def get_feature(data):
     feat = list()
     feat.append(float(data['te_asr']))
 
-    if hash_map is None:
-        global global_hash_map
-        hash_map = global_hash_map
-    else:
-        print(hash_map)
+    global global_hash_map
+    hash_map = global_hash_map
 
     hash_str = str(data['trigger_info'])
     hash_str = hash_str.split(':')[0]
 
-    # hash_v = hash(hash_str)
     if hash_str not in hash_map:
-        hash_map[hash_str] = len(hash_map)
-    feat.append(hash_map[hash_str])
+        print(hash_str)
+        raise NotImplementedError
+
+    a = [0]*3
+    a[hash_map[hash_str]] = 1
+    feat.extend(a)
 
     if data['rst_dict'] is not None:
         feat.append(data['rst_dict']['loss'])
@@ -250,11 +249,8 @@ def trojan_detector(model_filepath, tokenizer_filepath, result_filepath, scratch
         fh.write("{}".format(trojan_probability))
 
     if not RELEASE:
-        prefix, model_id = os.path.split(model_dirpath)
-        prefix, a = os.path.split(prefix)
-        while a=='models':
-            prefix, a = os.path.split(prefix)
-        outname = a+'-'+model_id+'.pkl'
+        from utils import model_dirpath_to_id_name
+        outname = model_dirpath_to_id_name(model_dirpath)+'.pkl'
         outpath = os.path.join(scratch_dirpath, outname)
         print('save record_dict to', outpath)
         with open(outpath, 'wb') as f:
