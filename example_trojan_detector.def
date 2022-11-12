@@ -1,53 +1,21 @@
 Bootstrap: docker
-From: pytorch/pytorch:1.8.0-cuda11.1-cudnn8-runtime
+From: pytorch/pytorch:1.12.0-cuda11.3-cudnn8-runtime
 
 %files
     ./example_trojan_detector.py /
-    ./trojan_detector_qa.py /
-    ./trojan_detector_ner.py /
-    ./trojan_detector_sc.py /
-    ./trojan_detector_base.py /
-    ./reverse_trigger.py /
-    ./train_clf.py /
-    ./utils_nlp.py /
-    ./utils.py /
-    ./rainbow.py /
-    ./game_env.py /
-    ./segment_tree.py /
-    ./squad_v2_data.json /
-    ./conll2003_data.json /
-    ./imdb_data.json /
     ./metaparameters.json /
     ./metaparameters_schema.json /
-    ./config.json /
     ./learned_parameters /
-    ./learned_parameters/LM_models /learned_parameters/
-    ./learned_parameters/LM_models /learned_parameters/
-    ./learned_parameters/LM_models/distilbert /learned_parameters/LM_models/
-    ./learned_parameters/LM_models/distilbert/config.json /learned_parameters/LM_models/distilbert/
-    ./learned_parameters/LM_models/distilbert/pytorch_model.bin /learned_parameters/LM_models/distilbert/
-    ./learned_parameters/LM_models/google-electra-small-discriminator /learned_parameters/LM_models/
-    ./learned_parameters/LM_models/google-electra-small-discriminator/config.json /learned_parameters/LM_models/google-electra-small-discriminator/
-    ./learned_parameters/LM_models/google-electra-small-discriminator/pytorch_model.bin /learned_parameters/LM_models/google-electra-small-discriminator/
-    ./learned_parameters/LM_models/roberta-base /learned_parameters/LM_models/
-    ./learned_parameters/LM_models/roberta-base/config.json /learned_parameters/LM_models/roberta-base/
-    ./learned_parameters/LM_models/roberta-base/pytorch_model.bin /learned_parameters/LM_models/roberta-base/
-    ./dqn_record.pkl /
-    ./lgbm.joblib /
-    ./adj_lr_param.pkl /
-    ./adj_param.pkl /
 
 %post
-    pip install jsonargparse
-    pip install jsonpickle
-    pip install jsonschema
-    pip install transformers==4.10.3
-    pip install datasets==1.11.0
-    pip install lightgbm
-    pip install joblib
-    pip install scikit-image
-    pip install matplotlib
-    pip install sympy
+    apt update
+
+    # Needed for cv2
+    apt -y install libglib2.0-0 libx11-6
+
+    pip install --upgrade pip
+    pip install torch==1.12 torchvision==0.13
+    pip install timm opencv-python jsonschema jsonargparse
 
 %runscript
     exec python3 /example_trojan_detector.py "$@"
