@@ -13,6 +13,13 @@ from test import kfold_validation
 from reversion import RevisionDetector
 from test import kfold_validation
 
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.svm import SVC
+from lightgbm import LGBMClassifier
+
+import pickle
+
 sys.path.insert(0, '..')
 
 HOME = os.environ['HOME']
@@ -20,21 +27,26 @@ ROOT = os.path.join(HOME, 'data/tdc_data')
 FINAL_ROUND_FOLDER = os.path.join(ROOT, 'detection/final_round_test')
 
 
-def ext_quantiles(a, bins=128, normalize=True):
+def ext_quantiles(a, bins=64, normalize=True):
     qs = [i/bins for i in range(bins)]
     if normalize:
-        s = np.std(a)
+        if len(a) == 1:
+            s = 1.0
+        else:
+            s = np.std(a)
         m = np.mean(a)
         aa = (a-m)/s
-        return np.quantile(aa, qs)
+        rst = np.quantile(aa, qs)
     else:
-        return np.quantile(a, qs)
+        rst = np.quantile(a, qs)
+    return rst
 
 
 def ext_features_of_array(a):
     flatted_a = a.flatten()
-    features_a = [ext_quantiles(flatted_a), ext_quantiles(np.abs(flatted_a))]
-    features = np.concatenate(features_a, axis=0)
+    # features_a = [ext_quantiles(flatted_a), ext_quantiles(np.abs(flatted_a))]
+    # features = np.concatenate(features_a, axis=0)
+    features = ext_quantiles(flatted_a)
     return features
 
 
@@ -149,6 +161,88 @@ class MNIST_Detection_Network(nn.Module):
 
 
 
+def evaluate_v2(model, loader, configs):
+    all_inputs = list()
+    all_labels = list()
+    for inputs, labels in loader:
+        all_inputs.append(inputs.numpy())
+        all_labels.append(labels.numpy())
+
+    all_inputs = np.concatenate(all_inputs, axis=0)
+    all_labels = np.concatenate(all_labels, axis=0)
+
+    probs_list = list()
+    num_channels = all_inputs.shape[1]
+    for ch in range(num_channels):
+        fet = all_inputs[:, ch, :]
+        lab = all_labels
+
+        clf = model[ch]
+        probs = clf.predict_proba(fet)[:, 1]
+
+        probs_list.append(probs)
+
+    pred_scores = np.transpose(np.asarray(probs_list))
+
+    rf_clf = model['rf_clf']
+    preds = rf_clf.predict(pred_scores)
+    probs = rf_clf.predict_proba(pred_scores)
+    test_acc = np.sum(preds == all_labels) / len(all_labels)
+    print(f'test acc: {test_acc:.3f}')
+
+    test_rst = {
+        'acc': test_acc,
+        'probs': probs[:,1],
+    }
+    return test_rst
+
+
+
+def train_detection_model_v2(loader, configs):
+    all_inputs = list()
+    all_labels = list()
+    for inputs, labels in loader:
+        all_inputs.append(inputs.numpy())
+        all_labels.append(labels.numpy())
+
+    all_inputs = np.concatenate(all_inputs, axis=0)
+    all_labels = np.concatenate(all_labels, axis=0)
+
+    rst_models = dict()
+    probs_list = list()
+    num_channels = all_inputs.shape[1]
+    for ch in range(num_channels):
+        fet = all_inputs[:, ch, :]
+        lab = all_labels
+
+        sc = np.nan
+        while np.isnan(sc):
+            clf = make_pipeline(StandardScaler(), SVC(kernel='linear', probability=True))
+            clf.fit(fet, lab)
+            probs = clf.predict_proba(fet)[:, 1]
+            sc = np.corrcoef(probs, lab)[0, 1]
+
+        probs_list.append(probs)
+        rst_models[ch] = clf
+
+    pred_scores = np.transpose(np.asarray(probs_list))
+
+    # rf_clf = LGBMClassifier()
+    rf_clf = SVC(kernel='linear', probability=True)
+    rf_clf.fit(pred_scores, all_labels)
+    rst_models['rf_clf'] = rf_clf
+    preds = rf_clf.predict(pred_scores)
+    train_acc = np.sum(preds == all_labels) / len(all_labels)
+    print(f'train acc: {train_acc:.3f}')
+
+    train_rst = {
+        'train_acc': train_acc
+    }
+
+    return rst_models, train_rst
+
+
+
 def evaluate(model, loader, configs):
     probs_list = list()
     acc, cnt = 0, 0
@@ -175,6 +269,7 @@ def evaluate(model, loader, configs):
         'probs': probs,
     }
     return test_rst
+
 
 
 def train_detection_model(loader, feature_dim, configs):
@@ -218,33 +313,97 @@ def train_detection_model(loader, feature_dim, configs):
     return model, train_rst
 
 
+def svm_for_correlation(features, labels):
+    sc_list = list()
+    ch = features.shape[1]
+    for i in range(ch):
+        fet = features[:, i, :]
+        lab = labels
+
+        sc = np.nan
+        while np.isnan(sc):
+            clf = make_pipeline(StandardScaler(), SVC(kernel='linear', probability=True))
+            a = clf.fit(fet, lab)
+            probs = clf.predict_proba(fet)[:, 1]
+
+            sc = np.corrcoef(probs, lab)[0, 1]
+
+        sc_list.append(np.abs(sc))
+
+        # print(i, sc, np.min(probs), np.max(probs))
+
+
+    order = np.argsort(sc_list)
+    for o in order:
+        print(o, sc_list[o])
+    best_order = order[-32:]
+    best_order.sort()
+    print(best_order)
+
+    best_features = features[:, best_order, :]
+
+    return best_order, best_features
+
+
 def learn(output_dir, model_dir, configs, save_out=None):
 
+    all_probs = list()
     model_types = configs['model_types']
     for ty in model_types:
+        # ty = 'ResNet50'
+        print(ty)
         saveout_name = ty
-        saveout_path = f'training_features_{saveout_name}_normalized.pkl'
+        saveout_path = f'training_features_{saveout_name}_normalized_64.pkl'
 
         _configs = configs[ty]
-        labels, features = get_training_features(output_dir, model_dir, _configs, save_out=saveout_path)
+        # labels, features = get_training_features(output_dir, model_dir, _configs, save_out=saveout_path)
+
+        print(_configs)
 
         with open(saveout_path,'rb') as f:
             data = pickle.load(f)
         labels, features = data['labels'], data['features']
 
+        p = f'{ty}_best_roder.npy'
+        p = os.path.join(output_dir,p)
+        print(p)
+
+        '''
+        best_order, best_features = svm_for_correlation(features, labels)
+        with open(p, 'wb') as f:
+            np.save(f, best_order)
+        # '''
+
+        with open(p, 'rb') as f:
+            best_order = np.load(f)
+        best_features = features[:, best_order, :]
+
+        features = best_features
+
         labels, features = torch.from_numpy(labels), torch.from_numpy(features)
         dataset = torch.utils.data.TensorDataset(features, labels)
 
-        kfold_validation(k_fold=4, dataset=dataset, train_fn=train_detection_model, test_fn=evaluate, configs=_configs)
+        print(features.shape)
+
+        # kfold_validation(k_fold=4, dataset=dataset, train_fn=train_detection_model_v2, test_fn=evaluate_v2, configs=_configs)
+        # exit(0)
 
         batch_size = _configs['detection_train_batch_size']
         train_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
-        model, train_rst = train_detection_model(train_loader, configs)
+        model, train_rst = train_detection_model_v2(train_loader, configs)
+        test_rst = evaluate_v2(model, train_loader, configs)
+        all_probs.append(test_rst['probs'])
+
+        model['best_order'] = best_order
+
         output_path = os.path.join(output_dir, saveout_name+'.pd')
-        torch.save(model.state_dict(), output_path)
+        # torch.save(model.state_dict(), output_path)
+        with open(output_path, 'wb') as f:
+            pickle.dump(model, f)
 
-
-
+    #print(all_probs[0])
+    #print(all_probs[1])
+    #print(all_probs[2])
 
 
 

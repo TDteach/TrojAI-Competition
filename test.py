@@ -26,7 +26,6 @@ def kfold_validation(k_fold, dataset, train_fn, test_fn, configs):
     batch_size = configs['detection_train_batch_size']
     kfold = KFold(n_splits = k_fold, shuffle = True)
 
-    feature_dim = dataset[0][0].shape[0]
     labels = [data[1].item() for data in dataset]
     labels = np.asarray(labels)
 
@@ -42,7 +41,7 @@ def kfold_validation(k_fold, dataset, train_fn, test_fn, configs):
         train_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, sampler=train_subsampler)
         test_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, sampler=test_subsampler)
 
-        model, train_rst = train_fn(train_loader, feature_dim, configs)
+        model, train_rst = train_fn(train_loader, configs)
 
         test_rst = test_fn(model, test_loader, configs)
 

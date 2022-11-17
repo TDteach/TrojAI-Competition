@@ -17,7 +17,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 from training import learn as configure_fn
-from detection import weight_detection as detection_fn
+from detection import weight_detection_v2 as detection_fn
 
 def example_trojan_detector(model_filepath, result_filepath, scratch_dirpath, examples_dirpath, round_training_dataset_dirpath, parameters_dirpath, configs, example_img_format='jpg'):
     logging.info('model_filepath = {}'.format(model_filepath))
@@ -117,7 +117,7 @@ if __name__ == "__main__":
     parser.add_argument('--round_training_dataset_dirpath', type=str, help='File path to the directory containing id-xxxxxxxx models of the current rounds training dataset.', default=None)
 
     parser.add_argument('--metaparameters_filepath', help='Path to JSON file containing values of tunable paramaters to be used when evaluating models.', default='metaparameters.json')
-    parser.add_argument('--schema_filepath', type=str, help='Path to a schema file in JSON Schema format against which to validate the config file.', default=None)
+    parser.add_argument('--schema_filepath', type=str, help='Path to a schema file in JSON Schema format against which to validate the config file.', default='metaparameters_schema.json')
     parser.add_argument('--learned_parameters_dirpath', type=str, help='Path to a directory containing parameter data (model weights, etc.) to be used when evaluating models.  If --configure_mode is set, these will instead be overwritten with the newly-configured parameters.', default='./learned_parameters')
 
     parser.add_argument('--configure_mode', help='Instead of detecting Trojans, set values of tunable parameters and write them to a given location.', default=False, action="store_true")
@@ -139,14 +139,14 @@ if __name__ == "__main__":
     if args.metaparameters_filepath is not None:
         with open(args.metaparameters_filepath) as config_file:
             config_json = json.load(config_file)
-    '''
     if args.schema_filepath is not None:
         with open(args.schema_filepath) as schema_file:
             schema_json = json.load(schema_file)
 
         # this throws a fairly descriptive error if validation fails
         jsonschema.validate(instance=config_json, schema=schema_json)
-    '''
+
+    exit(0)
 
     logging.info(args)
 

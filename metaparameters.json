@@ -1,27 +1,27 @@
 {
     "ResNet50": {
         "model_architecture": "classification:resnet50",
-        "channels_st": 105,
+        "channels_st": 0,
         "detection_train_batch_size": 256,
         "detection_train_lr": 1e-3,
-        "detection_train_wegith_decay": 5e-4,
+        "detection_train_weight_decay": 5e-4,
         "detection_train_epochs": 150
     },
     "ViT": {
         "model_architecture": "classification:vit_base_patch32_224",
-        "channels_st": 2561,
+        "channels_st": 0,
         "detection_train_batch_size": 256,
         "detection_train_lr": 1e-3,
-        "detection_train_wegith_decay": 1e-3,
+        "detection_train_weight_decay": 1e-3,
         "detection_train_epochs": 200
     },
     "MobileNetV2": {
         "model_architecture": "classification:mobilenet_v2",
-        "channels_st": 42,
+        "channels_st": 0,
         "detection_train_batch_size": 256,
         "detection_train_lr": 1e-3,
-        "detection_train_wegith_decay": 1e-5,
-        "detection_train_epochs": 100
+        "detection_train_weight_decay": 1e-4,
+        "detection_train_epochs": 50
     },
     "model_types": ["ResNet50", "ViT", "MobileNetV2"]
 }
