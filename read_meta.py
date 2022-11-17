@@ -34,7 +34,7 @@ def expand_dict(d, prefix: str=None):
     return kv_dict
 
 
-def meta_summary(meta_list, max_uniques=20):
+def summaries_meta(meta_list, max_uniques=20):
     summary_dict = dict()
     for row in meta_list:
         kv_dict = expand_dict(row)
@@ -82,6 +82,9 @@ if __name__ == '__main__':
 
     meta_csv = read_csv(meta_path)
     meta_summary = meta_summary(meta_csv, max_uniques=1000)
+
+    print(meta_summary['poisoned'])
+    exit(0)
 
     sel = select_by_conditions(meta_csv, conds={'model_architecture':'classification:resnet50'}, meta_summary=meta_summary)
     print(sel)

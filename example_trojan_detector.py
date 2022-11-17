@@ -13,18 +13,19 @@ import json
 import jsonschema
 
 import logging
-import warnings 
+import warnings
 warnings.filterwarnings("ignore")
 
-def example_trojan_detector(model_filepath, result_filepath, scratch_dirpath, examples_dirpath, round_training_dataset_dirpath, parameters_dirpath, parameter1, parameter2, example_img_format='jpg'):
+from training import learn as configure_fn
+from detection import weight_detection as detection_fn
+
+def example_trojan_detector(model_filepath, result_filepath, scratch_dirpath, examples_dirpath, round_training_dataset_dirpath, parameters_dirpath, configs, example_img_format='jpg'):
     logging.info('model_filepath = {}'.format(model_filepath))
     logging.info('result_filepath = {}'.format(result_filepath))
     logging.info('scratch_dirpath = {}'.format(scratch_dirpath))
     logging.info('examples_dirpath = {}'.format(examples_dirpath))
     logging.info('round_training_dataset_dirpath = {}'.format(round_training_dataset_dirpath))
     logging.info('Using parameters_dirpath = {}'.format(parameters_dirpath))
-    logging.info('Using parameter1 = {}'.format(parameter1))
-    logging.info('Using parameter2 = {}'.format(parameter2))
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logging.info("Using compute device: {}".format(device))
@@ -33,6 +34,15 @@ def example_trojan_detector(model_filepath, result_filepath, scratch_dirpath, ex
     model = torch.load(model_filepath)
     model.to(device)
     model.eval()
+
+    trojan_probability = detection_fn(model, parameters_dirpath, configs)
+
+    print('Trojan Probability: {}'.format(trojan_probability))
+
+    with open(result_filepath, 'w') as fh:
+        fh.write("{}".format(trojan_probability))
+
+    exit(0)
 
     # Augmentation transformations
     augmentation_transforms = torchvision.transforms.Compose([torchvision.transforms.ConvertImageDtype(torch.float)])
@@ -87,32 +97,13 @@ def example_trojan_detector(model_filepath, result_filepath, scratch_dirpath, ex
 
 def configure(output_parameters_dirpath,
               configure_models_dirpath,
-              parameter3):
-    logging.info('Using parameter3 = {}'.format(str(parameter3)))
-
+              configs,
+              ):
     logging.info('Configuring detector parameters with models from ' + configure_models_dirpath)
 
     os.makedirs(output_parameters_dirpath, exist_ok=True)
 
-    logging.info('Writing configured parameter data to ' + output_parameters_dirpath)
-
-    arr = np.random.rand(100,100)
-    np.save(os.path.join(output_parameters_dirpath, 'numpy_array.npy'), arr)
-
-    with open(os.path.join(output_parameters_dirpath, "single_number.txt"), 'w') as fh:
-        fh.write("{}".format(17))
-
-    example_dict = dict()
-    example_dict['keya'] = 2
-    example_dict['keyb'] = 3
-    example_dict['keyc'] = 5
-    example_dict['keyd'] = 7
-    example_dict['keye'] = 11
-    example_dict['keyf'] = 13
-    example_dict['keyg'] = 17
-
-    with open(os.path.join(output_parameters_dirpath, "dict.json"), mode='w', encoding='utf-8') as f:
-        json.dump(example_dict, f, warnings=True, indent=2)
+    configure_fn(output_parameters_dirpath, configure_models_dirpath, configs)
 
 
 if __name__ == "__main__":
@@ -125,17 +116,17 @@ if __name__ == "__main__":
     parser.add_argument('--examples_dirpath', type=str, help='File path to the folder of examples which might be useful for determining whether a model is poisoned.', default='./example')
     parser.add_argument('--round_training_dataset_dirpath', type=str, help='File path to the directory containing id-xxxxxxxx models of the current rounds training dataset.', default=None)
 
-    parser.add_argument('--metaparameters_filepath', help='Path to JSON file containing values of tunable paramaters to be used when evaluating models.', action=ActionConfigFile)
+    parser.add_argument('--metaparameters_filepath', help='Path to JSON file containing values of tunable paramaters to be used when evaluating models.', default='metaparameters.json')
     parser.add_argument('--schema_filepath', type=str, help='Path to a schema file in JSON Schema format against which to validate the config file.', default=None)
-    parser.add_argument('--learned_parameters_dirpath', type=str, help='Path to a directory containing parameter data (model weights, etc.) to be used when evaluating models.  If --configure_mode is set, these will instead be overwritten with the newly-configured parameters.')
+    parser.add_argument('--learned_parameters_dirpath', type=str, help='Path to a directory containing parameter data (model weights, etc.) to be used when evaluating models.  If --configure_mode is set, these will instead be overwritten with the newly-configured parameters.', default='./learned_parameters')
 
     parser.add_argument('--configure_mode', help='Instead of detecting Trojans, set values of tunable parameters and write them to a given location.', default=False, action="store_true")
     parser.add_argument('--configure_models_dirpath', type=str, help='Path to a directory containing models to use when in configure mode.')
 
     # these parameters need to be defined here, but their values will be loaded from the json file instead of the command line
-    parser.add_argument('--parameter1', type=int, help='An example tunable parameter.')
-    parser.add_argument('--parameter2', type=float, help='An example tunable parameter.')
-    parser.add_argument('--parameter3', type=str, help='An example tunable parameter.')
+    # parser.add_argument('--parameter1', type=int, help='An example tunable parameter.')
+    # parser.add_argument('--parameter2', type=float, help='An example tunable parameter.')
+    # parser.add_argument('--parameter3', type=str, help='An example tunable parameter.')
 
     args = parser.parse_args()
 
@@ -146,18 +137,16 @@ if __name__ == "__main__":
     # Validate config file against schema
     config_json = None
     if args.metaparameters_filepath is not None:
-        with open(args.metaparameters_filepath[0]()) as config_file:
+        with open(args.metaparameters_filepath) as config_file:
             config_json = json.load(config_file)
-            if args.parameter1 is None:
-                args.parameter1 = config_json['parameters1']
-            if args.parameter2 is None:
-                args.parameter2 = config_json['parameters1']
+    '''
     if args.schema_filepath is not None:
         with open(args.schema_filepath) as schema_file:
             schema_json = json.load(schema_file)
 
         # this throws a fairly descriptive error if validation fails
         jsonschema.validate(instance=config_json, schema=schema_json)
+    '''
 
     logging.info(args)
 
@@ -167,9 +156,8 @@ if __name__ == "__main__":
             args.scratch_dirpath is not None and
             args.examples_dirpath is not None and
             args.round_training_dataset_dirpath is not None and
-            args.learned_parameters_dirpath is not None and
-            args.parameter1 is not None and
-            args.parameter2 is not None):
+            args.learned_parameters_dirpath is not None
+            ):
 
             logging.info("Calling the trojan detector")
             example_trojan_detector(args.model_filepath,
@@ -178,19 +166,21 @@ if __name__ == "__main__":
                                     args.examples_dirpath,
                                     args.round_training_dataset_dirpath,
                                     args.learned_parameters_dirpath,
-                                    args.parameter1, args.parameter2)
+                                    configs=config_json
+                                    )
         else:
             logging.info("Required Evaluation-Mode parameters missing!")
     else:
         if (args.learned_parameters_dirpath is not None and
-            args.configure_models_dirpath is not None and
-            args.parameter3 is not None):
+            args.configure_models_dirpath is not None
+            ):
 
             logging.info("Calling configuration mode")
             # all 3 example parameters will be loaded here, but we only use parameter3
             configure(args.learned_parameters_dirpath,
                       args.configure_models_dirpath,
-                      args.parameter3)
+                      config_json
+                      )
         else:
             logging.info("Required Configure-Mode parameters missing!")
 
