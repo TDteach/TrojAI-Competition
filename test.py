@@ -29,7 +29,6 @@ def kfold_validation(k_fold, dataset, train_fn, test_fn, configs):
     labels = [data[1].item() for data in dataset]
     labels = np.asarray(labels)
 
-    rst_list = list()
     probs = np.zeros(len(dataset))
     for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
         print(f'FOLD {fold}')
@@ -45,17 +44,19 @@ def kfold_validation(k_fold, dataset, train_fn, test_fn, configs):
 
         test_rst = test_fn(model, test_loader, configs)
 
-        rst_list.append(test_rst)
-
         _probs = test_rst['probs']
         test_ids = np.asarray(test_ids)
         probs[test_ids] = _probs
 
 
+    rst_dict = {
+        'probs': probs,
+        'labs': labels,
+    }
+
     auc = roc_auc_score(labels, probs)
     print(f'AUC: {auc:.3f}')
 
-    return rst_list
-
+    return rst_dict
 
 

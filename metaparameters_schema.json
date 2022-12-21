@@ -15,7 +15,7 @@
           "model_architecture": {
               "type": "string"
           },
-          "channels_st": {
+          "weights_st": {
               "type": "integer"
           },
           "detection_train_batch_size": {
@@ -31,7 +31,7 @@
               "type": "integer"
           }
       },
-      "required": ["model_architecture", "channels_st"]
+      "required": ["model_architecture", "weights_st"]
     },
     "ViT": {
       "type": "object",
@@ -39,7 +39,7 @@
           "model_architecture": {
               "type": "string"
           },
-          "channels_st": {
+          "weights_st": {
               "type": "integer"
           },
           "detection_train_batch_size": {
@@ -55,7 +55,7 @@
               "type": "integer"
           }
       },
-      "required": ["model_architecture", "channels_st"]
+      "required": ["model_architecture", "weights_st"]
     },
     "MobileNetV2": {
       "type": "object",
@@ -63,7 +63,7 @@
           "model_architecture": {
               "type": "string"
           },
-          "channels_st": {
+          "weights_st": {
               "type": "integer"
           },
           "detection_train_batch_size": {
@@ -79,7 +79,7 @@
               "type": "integer"
           }
       },
-      "required": ["model_architecture", "channels_st"]
+      "required": ["model_architecture", "weights_st"]
     },
     "model_types": {
         "type": "array",

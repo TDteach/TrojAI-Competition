@@ -27,7 +27,7 @@ ROOT = os.path.join(HOME, 'data/tdc_data')
 FINAL_ROUND_FOLDER = os.path.join(ROOT, 'detection/final_round_test')
 
 
-def ext_quantiles(a, bins=64, normalize=True):
+def ext_quantiles(a, bins=128, normalize=False):
     qs = [i/bins for i in range(bins)]
     if normalize:
         if len(a) == 1:
@@ -36,21 +36,31 @@ def ext_quantiles(a, bins=64, normalize=True):
             s = np.std(a)
         m = np.mean(a)
         aa = (a-m)/s
-        rst = np.quantile(aa, qs)
+        rst = np.quantile(aa, qs, interpolation='nearest')
+
+        # rst = np.concatenate([rst, np.asarray([m, s])], axis=0)
     else:
-        rst = np.quantile(a, qs)
+        # rst = np.quantile(a, qs, method='nearest')
+        rst = np.quantile(a, qs, interpolation='nearest')
     return rst
 
 
 def ext_features_of_array(a):
     flatted_a = a.flatten()
-    # features_a = [ext_quantiles(flatted_a), ext_quantiles(np.abs(flatted_a))]
-    # features = np.concatenate(features_a, axis=0)
-    features = ext_quantiles(flatted_a)
+    features_a = [ext_quantiles(flatted_a), ext_quantiles(np.abs(flatted_a))]
+    features = np.concatenate(features_a, axis=0)
     return features
 
 
 def ext_features_of_weight(w):
+    fw = w.flatten()
+    if len(fw) == 1:
+        s = 1.0
+    else:
+        s = np.std(fw)
+    m = np.mean(fw)
+    w = (w-m)/s
+
     w_shape = w.shape
     if len(w_shape) <= 2:
         return np.asarray([ext_features_of_array(w)])
@@ -69,20 +79,25 @@ def ext_features_of_weight(w):
     return features
 
 
-def ext_features_of_model(model, channels_st=None, channels_ed=None, mode='silent'):
-    fet_list = list()
+def ext_features_of_model(model, weights_st=None, weights_ed=None, mode='silent'):
+    weights_list = list(model.named_parameters())
+
+    if weights_st is None: weights_st = 0
+    if weights_ed is None: weights_ed = len(weights_list)
+
     k = 0
-    for name, w in model.named_parameters():
+    fet_list = list()
+    for i, (name, w) in enumerate(weights_list):
+        if i < weights_st: continue
+
         fet_list.append(ext_features_of_weight(w.detach().cpu().numpy()))
         nk = k+len(fet_list[-1])
         if mode=='show':
-            print(k,'-',nk, name, w.shape)
+            print(i, k,'-',nk, name, w.shape)
         k = nk
     features = np.concatenate(fet_list, axis=0)
 
-    if channels_st is None: channels_st = 0
-    if channels_ed is None: channels_ed = len(features)
-    return features[channels_st:channels_ed]
+    return features
 
 
 def get_training_features(output_dir, model_dir, configs, save_out=None):
@@ -91,7 +106,7 @@ def get_training_features(output_dir, model_dir, configs, save_out=None):
     meta_csv = read_csv(meta_path)
     meta_summary = summaries_meta(meta_csv, max_uniques=1000)
 
-    channels_st = configs['channels_st']
+    weights_st = configs['weights_st']
     md_archi = configs['model_architecture']
     rows, model_ids = select_by_conditions(meta_csv, conds={'model_architecture':md_archi}, meta_summary=meta_summary)
 
@@ -108,7 +123,8 @@ def get_training_features(output_dir, model_dir, configs, save_out=None):
         model = torch.load(model_path)
         model.eval()
 
-        fet = ext_features_of_model(model, channels_st=channels_st)
+        # fet = ext_features_of_model(model, weights_st=weights_st, mode='show')
+        fet = ext_features_of_model(model, weights_st=weights_st, mode='silent')
 
         labels.append(lb)
         features.append(fet)
@@ -193,6 +209,7 @@ def evaluate_v2(model, loader, configs):
     test_rst = {
         'acc': test_acc,
         'probs': probs[:,1],
+        'labs': all_labels,
     }
     return test_rst
 
@@ -217,7 +234,8 @@ def train_detection_model_v2(loader, configs):
 
         sc = np.nan
         while np.isnan(sc):
-            clf = make_pipeline(StandardScaler(), SVC(kernel='linear', probability=True))
+            # clf = make_pipeline(StandardScaler(), SVC(kernel='linear', probability=True))
+            clf = SVC(kernel='linear', probability=True)
             clf.fit(fet, lab)
             probs = clf.predict_proba(fet)[:, 1]
             sc = np.corrcoef(probs, lab)[0, 1]
@@ -320,6 +338,20 @@ def svm_for_correlation(features, labels):
         fet = features[:, i, :]
         lab = labels
 
+        # '''
+        dim = fet.shape[-1]
+        max_sc = -np.inf
+        for j in range(dim):
+            x = fet[:, j]
+            sc = np.corrcoef(x, lab)[0, 1]
+            if np.isnan(sc):
+                sc = 0
+            sc = np.abs(sc)
+            max_sc = max(sc, max_sc)
+        sc_list.append(max_sc)
+        # '''
+
+        '''
         sc = np.nan
         while np.isnan(sc):
             clf = make_pipeline(StandardScaler(), SVC(kernel='linear', probability=True))
@@ -329,6 +361,7 @@ def svm_for_correlation(features, labels):
             sc = np.corrcoef(probs, lab)[0, 1]
 
         sc_list.append(np.abs(sc))
+        # '''
 
         # print(i, sc, np.min(probs), np.max(probs))
 
@@ -336,8 +369,10 @@ def svm_for_correlation(features, labels):
     order = np.argsort(sc_list)
     for o in order:
         print(o, sc_list[o])
-    best_order = order[-32:]
+    best_order = order[-48:]
     best_order.sort()
+
+    print(np.mean([sc_list[o] for o in best_order]))
     print(best_order)
 
     best_features = features[:, best_order, :]
@@ -348,12 +383,13 @@ def svm_for_correlation(features, labels):
 def learn(output_dir, model_dir, configs, save_out=None):
 
     all_probs = list()
+    all_labs = list()
     model_types = configs['model_types']
     for ty in model_types:
         # ty = 'ResNet50'
         print(ty)
         saveout_name = ty
-        saveout_path = f'training_features_{saveout_name}_normalized_64.pkl'
+        saveout_path = f'training_features_{saveout_name}_normalized_128*2.pkl'
 
         _configs = configs[ty]
         # labels, features = get_training_features(output_dir, model_dir, _configs, save_out=saveout_path)
@@ -372,6 +408,7 @@ def learn(output_dir, model_dir, configs, save_out=None):
         best_order, best_features = svm_for_correlation(features, labels)
         with open(p, 'wb') as f:
             np.save(f, best_order)
+        # exit(0)
         # '''
 
         with open(p, 'rb') as f:
@@ -385,14 +422,14 @@ def learn(output_dir, model_dir, configs, save_out=None):
 
         print(features.shape)
 
-        # kfold_validation(k_fold=4, dataset=dataset, train_fn=train_detection_model_v2, test_fn=evaluate_v2, configs=_configs)
-        # exit(0)
+        rst_dict = kfold_validation(k_fold=4, dataset=dataset, train_fn=train_detection_model_v2, test_fn=evaluate_v2, configs=_configs)
+        all_probs.append(rst_dict['probs'])
+        all_labs.append(rst_dict['labs'])
 
         batch_size = _configs['detection_train_batch_size']
         train_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
         model, train_rst = train_detection_model_v2(train_loader, configs)
         test_rst = evaluate_v2(model, train_loader, configs)
-        all_probs.append(test_rst['probs'])
 
         model['best_order'] = best_order
 
@@ -401,9 +438,32 @@ def learn(output_dir, model_dir, configs, save_out=None):
         with open(output_path, 'wb') as f:
             pickle.dump(model, f)
 
-    #print(all_probs[0])
-    #print(all_probs[1])
-    #print(all_probs[2])
+
+    all_fets = list()
+    all_tgts = list()
+    i = 0
+    for ty, probs, labs in zip(model_types, all_probs, all_labs):
+        for p, l in zip(probs, labs):
+            w = np.zeros(4,dtype=np.float32)
+            w[i] = 1
+            w[3] = p
+            all_fets.append(w)
+            all_tgts.append(l)
+        i += 1
+    all_fets = np.asarray(all_fets)
+    all_tgts = np.asarray(all_tgts)
+
+    # global_clf = SVC(kernel='linear', probability=True)
+    global_clf = SVC(probability=True)
+    global_clf.fit(all_fets, all_tgts)
+    preds = global_clf.predict(all_fets)
+    train_acc = np.sum(preds == all_tgts) / len(all_tgts)
+    print('final train acc:', train_acc)
+
+    output_path = os.path.join(output_dir, 'global.pd')
+    with open(output_path, 'wb') as f:
+        pickle.dump(global_clf, f)
+
 
 
 

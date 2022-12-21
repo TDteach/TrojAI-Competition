@@ -146,8 +146,6 @@ if __name__ == "__main__":
         # this throws a fairly descriptive error if validation fails
         jsonschema.validate(instance=config_json, schema=schema_json)
 
-    exit(0)
-
     logging.info(args)
 
     if not args.configure_mode:

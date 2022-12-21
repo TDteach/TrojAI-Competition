@@ -45,11 +45,16 @@ def weight_detection(model, parameters_dirpath, configs):
 
 def weight_detection_v2(model, parameters_dirpath, configs):
     md_type = get_model_type(model, configs)
+    md_type_id = None
+    for i, ty in enumerate(configs['model_types']):
+        if ty == md_type:
+            md_type_id = i
+
     _configs = configs[md_type]
     print(_configs)
 
-    channels_st = _configs['channels_st']
-    fet = ext_features_of_model(model, channels_st=channels_st)
+    weights_st = _configs['weights_st']
+    fet = ext_features_of_model(model, weights_st=weights_st)
 
     cls_path = os.path.join(parameters_dirpath, md_type+'.pd')
     with open(cls_path, 'rb') as f:
@@ -73,8 +78,19 @@ def weight_detection_v2(model, parameters_dirpath, configs):
 
     rf_clf = cls_model['rf_clf']
     probs = rf_clf.predict_proba(pred_scores)
+    print(probs)
 
-    return probs[0,1]
+
+    glb_path = os.path.join(parameters_dirpath, 'global.pd')
+    with open(glb_path, 'rb') as f:
+        global_model = pickle.load(f)
+    w = np.zeros([1,4], dtype=np.float32)
+    w[0, md_type_id] = 1
+    w[0, 3] = probs[0,1]
+    print(w)
+    sc = global_model.predict_proba(w)[0, 1]
+
+    return sc
 
 
 if __name__ == '__main__':
