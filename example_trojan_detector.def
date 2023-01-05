@@ -1,34 +1,23 @@
 Bootstrap: docker
-From: pytorch/pytorch:1.12.0-cuda11.3-cudnn8-runtime
+From: pytorch/pytorch:1.13.1-cuda11.6-cudnn8-runtime
 
 %files
-    ./example_trojan_detector.py /
+    ./archs.py /
+    ./detector.py /
+    ./entrypoint.py /
+    ./gather_data.py /
+    ./utils /
     ./metaparameters.json /
     ./metaparameters_schema.json /
     ./learned_parameters /
-    ./learned_parameters/MobileNetV2.pd /learned_parameters
-    ./learned_parameters/ResNet50.pd /learned_parameters
-    ./learned_parameters/ViT.pd /learned_parameters
-    ./learned_parameters/global.pd /learned_parameters
-    ./detection.py /
-    ./inception.py /
-    ./read_meta.py /
-    ./reversion.py /
-    ./test.py /
-    ./training.py /
-
+    ./scale_params.npy /
 
 %post
     apt update
 
-    # Needed for cv2
-    apt -y install libglib2.0-0 libx11-6
-
     pip install --upgrade pip
-    pip install torch==1.12 torchvision==0.13
-    pip install timm opencv-python jsonschema jsonargparse
-    pip install scikit-learn
+    pip install tqdm jsonschema jsonargparse scikit-learn
     pip install lightgbm
 
 %runscript
-    exec python3 /example_trojan_detector.py "$@"
+    exec python3 /entrypoint.py "$@"
