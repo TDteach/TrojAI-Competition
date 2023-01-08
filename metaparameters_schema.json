@@ -3,7 +3,7 @@
   "technique": "LightGBM classifier",
   "technique_description": "Calculate the gradient of class 1 w.r.t inputs, then use LGBM to do the classification",
   "technique_changes": "Output metaparameter.json file after reconfiguration",
-  "commit_id": "30b7c0d3ff4adc40f6cae56ac6e40e393571a35a",
+  "commit_id": "5535842310aa5cb9b577e90bb1427484c89dfefb",
   "repo_name": "https://github.com/TDteach/TrojAI-Competition.git",
   "additionalProperties": false,
   "type": "object",
