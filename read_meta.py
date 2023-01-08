@@ -6,8 +6,8 @@ from collections import Counter
 
 HOME = os.environ['HOME']
 ROOT = os.path.join(HOME, 'share/trojai')
-ROUND = 'round11'
-PHRASE = 'image-classification-sep2022-train'
+ROUND = 'round12'
+PHRASE = 'cyber-pdf-dec2022-train'
 
 
 
@@ -81,9 +81,12 @@ if __name__ == '__main__':
     meta_path = os.path.join(ROOT, ROUND, PHRASE, 'METADATA.csv')
 
     meta_csv = read_csv(meta_path)
-    meta_summary = meta_summary(meta_csv, max_uniques=1000)
+    meta_summary = summaries_meta(meta_csv, max_uniques=1000)
 
-    print(meta_summary['poisoned'])
+    for k in meta_summary:
+        if len(meta_summary[k])<= 10:
+            print(k, meta_summary[k])
+
     exit(0)
 
     sel = select_by_conditions(meta_csv, conds={'model_architecture':'classification:resnet50'}, meta_summary=meta_summary)

@@ -1,94 +1,21 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Algorithm Meta-Parameters",
-  "technique": "Technique name",
-  "technique_description": "Technique description",
-  "technique_changes": "Technique changes from submission to submission",
-  "commit_id": "5b078e7fa98ac4c3d1393376d8db1ffa4e976e52",
-  "repo_name": "https://github.com/usnistgov/trojai-example",
+  "title": "TrojAI Competition Gradient on Inputs Attempt",
+  "technique": "LightGBM classifier",
+  "technique_description": "Calculate the gradient of class 1 w.r.t inputs, then use LGBM to do the classification",
+  "technique_changes": "Output metaparameter.json file after reconfiguration",
+  "commit_id": "765b70a0ba1701312462f712b445f60b75fb46e8",
+  "repo_name": "https://github.com/TDteach/TrojAI-Competition.git",
   "additionalProperties": false,
   "type": "object",
   "properties": {
-    "ResNet50": {
-      "type": "object",
-      "properties": {
-          "model_architecture": {
-              "type": "string"
-          },
-          "weights_st": {
-              "type": "integer"
-          },
-          "detection_train_batch_size": {
-              "type": "integer"
-          },
-          "detection_train_lr": {
-              "type": "number"
-          },
-          "detection_train_weight_decay": {
-              "type": "number"
-          },
-          "detection_train_epochs": {
-              "type": "integer"
-          }
-      },
-      "required": ["model_architecture", "weights_st"]
-    },
-    "ViT": {
-      "type": "object",
-      "properties": {
-          "model_architecture": {
-              "type": "string"
-          },
-          "weights_st": {
-              "type": "integer"
-          },
-          "detection_train_batch_size": {
-              "type": "integer"
-          },
-          "detection_train_lr": {
-              "type": "number"
-          },
-          "detection_train_weight_decay": {
-              "type": "number"
-          },
-          "detection_train_epochs": {
-              "type": "integer"
-          }
-      },
-      "required": ["model_architecture", "weights_st"]
-    },
-    "MobileNetV2": {
-      "type": "object",
-      "properties": {
-          "model_architecture": {
-              "type": "string"
-          },
-          "weights_st": {
-              "type": "integer"
-          },
-          "detection_train_batch_size": {
-              "type": "integer"
-          },
-          "detection_train_lr": {
-              "type": "number"
-          },
-          "detection_train_weight_decay": {
-              "type": "number"
-          },
-          "detection_train_epochs": {
-              "type": "integer"
-          }
-      },
-      "required": ["model_architecture", "weights_st"]
-    },
-    "model_types": {
-        "type": "array",
-        "items": {
-            "type": "string"
-        },
-        "minItems": 1,
-        "uniqueItems": true
-    }
-  },
-  "required": ["ResNet50", "ViT", "MobileNetV2", "model_types"]
+	"train_input_features":  {
+		"description": "The input features for training.",
+		"type": "integer",
+		"minimum": 32,
+		"maximum": 128,
+		"suggested_minimum": 32,
+		"suggested_maximum": 128
+	}
+  }
 }

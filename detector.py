@@ -20,7 +20,6 @@ from utils.reduction import (
     use_feature_reduction_algorithm,
 )
 
-from sklearn.preprocessing import StandardScaler
 from archs import Net2, Net3, Net4, Net5, Net6, Net7, Net2r, Net3r, Net4r, Net5r, Net6r, Net7r, Net2s, Net3s, Net4s, Net5s, Net6s, Net7s
 import torch
 
@@ -36,6 +35,8 @@ from torch.autograd import grad as torch_grad
 import torch.nn.functional as F
 
 import lightgbm as lgb
+
+from collections import OrderedDict
 
 
 def ext_quantiles(a, bins=100):
@@ -72,7 +73,133 @@ def align_weight(weight, target):
     return trans_w
 
 
-def feature_extraction(model, reference, good_inputs=None, md_path=None):
+
+def get_forward_hook_fn(k, embed_list):
+    def hook_fn(module, input, output):
+        embed_list[k] = output.detach().cpu().numpy()
+
+    return hook_fn
+
+def get_backward_hook_fn(k, grad_list):
+    def hook_fn(module, grad_input, grad_output):
+        grad_list[k] = grad_output[0].detach().cpu().numpy()
+
+    return hook_fn
+
+def extract_runtime_features(model, inputs):
+    child_list = list(model.children())
+    n_child = len(child_list)
+    embed_list = [None] * n_child
+    grad_list = [None] * n_child
+    hook_handler_list = list()
+    for k, m in enumerate(model.children()):
+        handler = m.register_forward_hook(get_forward_hook_fn(k, embed_list))
+        hook_handler_list.append(handler)
+        handler = m.register_backward_hook(get_backward_hook_fn(k, grad_list))
+        hook_handler_list.append(handler)
+
+    label_tensor = torch.ones(len(inputs), dtype=torch.int64)
+    input_tensor = torch.from_numpy(inputs)
+    input_variable = Variable(input_tensor, requires_grad=True)
+    logits = model(input_variable)
+    preds = torch.argmax(logits,axis=-1)
+    loss = F.cross_entropy(logits, label_tensor)
+    loss.backward()
+
+    for handler in hook_handler_list:
+        handler.remove()
+
+    embed_list.append(inputs)
+    grad_list.append(input_variable.grad.detach().cpu().numpy())
+
+    para_grads = OrderedDict(
+        {na: w.grad.detach().cpu().numpy() for (na, w) in model.named_parameters()}
+    )
+
+    return {
+        'mid_outs': embed_list,
+        'mid_grads': grad_list,
+        'para_grads': para_grads,
+    }
+
+
+def extract_aligned_features(model_feats, ref_feats):
+    src_repr, tgt_repr = model_feats['model_repr'], ref_feats['model_repr']
+    src_outs, tgt_outs = model_feats['runtime_feats']['mid_outs'], ref_feats['runtime_feats']['mid_outs']
+
+    src_o, tgt_o = src_outs[0], tgt_outs[0]
+
+    ns_list, nt_list = list(), list()
+    for s, t in zip(src_o, tgt_o):
+        ns, nt = np.linalg.norm(s), np.linalg.norm(t)
+        ns_list.append(ns)
+        nt_list.append(nt)
+    ns_list=np.asarray(ns_list)
+    nt_list=np.asarray(nt_list)
+
+    dvd = nt_list/ns_list
+    mean_sc = np.mean(dvd)
+
+    src_o = src_o * mean_sc
+    Z = np.matmul(src_o.transpose(), tgt_o)
+    u, s, vh = np.linalg.svd(Z)
+    M = np.matmul(u[:, :vh.shape[0]], vh)
+
+    '''
+    o_inv = np.linalg.pinv(src_o)
+    M = np.matmul(o_inv, tgt_o)
+    mean_sc = 1.0
+    '''
+    mean_sc = 1.0
+
+    src_repr_names = list(src_repr.keys())
+    src_w_name = src_repr_names[0]
+    src_w = src_repr[src_w_name]
+    src_w = src_w[:, :10]
+    ali_src_w = np.matmul(M.transpose(), src_w * mean_sc)
+
+    tgt_repr_names = list(tgt_repr.keys())
+    tgt_w_name = tgt_repr_names[0]
+    tgt_w = tgt_repr[tgt_w_name]
+    tgt_w = tgt_w[:, :10]
+
+    diff_w = tgt_w - ali_src_w
+
+    feats = ali_src_w.flatten()
+    feats = np.expand_dims(feats,axis=0)
+
+    return feats
+
+
+
+def feature_extraction(model, inputs, model_repr=None, model_class=None, ref_feats=None):
+    if isinstance(model, str):
+        model = torch.load(model)
+        model.eval()
+
+    if model_repr is None:
+        model_repr = OrderedDict(
+            {layer: tensor.numpy() for (layer, tensor) in model.state_dict().items()}
+        )
+    if model_class is None:
+        model_class = model.__class__.__name__
+
+    runtime_feats = extract_runtime_features(model, inputs)
+    model_feats = {
+        'model_repr': model_repr,
+        'runtime_feats': runtime_feats,
+        'model_class': model_class,
+    }
+
+    if ref_feats is None:
+        return model_feats
+
+    aligned_feats = extract_aligned_features(model_feats, ref_feats)
+    return aligned_feats
+
+
+
+
     model = torch.load(md_path)
     model.eval()
     label_tensor = torch.ones(len(good_inputs),dtype=torch.int64)
@@ -163,8 +290,8 @@ def train_fn(dataset, configs):
     X = np.concatenate(X, axis=0)
     y = np.asarray(y)
 
-    # clf = SVC(probability=True)
-    clf = lgb.LGBMClassifier(max_depth=4)
+    clf = SVC(probability=True)
+    # clf = lgb.LGBMClassifier(max_depth=2)
     clf.fit(X,y)
 
     preds = clf.predict(X)
@@ -197,22 +324,44 @@ def test_fn(model, dataset, configs):
     return test_rst
 
 
-def correlation_select(dataset):
+def correlation_select(dataset, num_feats=100):
     X, y = list(), list()
     for data, label in dataset:
         X.append(data)
         y.append(label)
     X = np.concatenate(X, axis=0)
     y = np.asarray(y)
+
     corr_list = list()
     for j in range(X.shape[1]):
         rst = np.corrcoef(X[:, j], y)[0,1]
         corr_list.append(rst)
 
-    order = np.argsort(corr_list)
+    order = np.argsort(np.abs(corr_list))
+    order = np.flip(order)
+
     for o in order:
         print(o, corr_list[o])
-    return None
+
+    return order[:num_feats]
+
+
+def trim_dataset_according_id(dataset, feat_id):
+    X, y = list(), list()
+    for data, label in dataset:
+        X.append(data)
+        y.append(label)
+    X = np.concatenate(X, axis=0)
+    y = np.asarray(y)
+
+    tX = X[:, feat_id]
+
+    new_dataset = list()
+    for i in range(len(y)):
+        new_dataset.append([tX[i:i+1,:], y[i]])
+
+    return new_dataset
+
 
 
 class Detector(AbstractDetector):
@@ -235,60 +384,11 @@ class Detector(AbstractDetector):
         self.layer_transform_filepath = join(self.learned_parameters_dirpath, "layer_transform.bin")
 
         # TODO: Update skew parameters per round
-        self.model_skew = {
-            "__all__": metaparameters["infer_cyber_model_skew"],
-        }
-
         self.input_features = metaparameters["train_input_features"]
-        self.weight_table_params = {
-            "random_seed": metaparameters["train_weight_table_random_state"],
-            "mean": metaparameters["train_weight_table_params_mean"],
-            "std": metaparameters["train_weight_table_params_std"],
-            "scaler": metaparameters["train_weight_table_params_scaler"],
-        }
-        self.random_forest_kwargs = {
-            "n_estimators": metaparameters[
-                "train_random_forest_regressor_param_n_estimators"
-            ],
-            "criterion": metaparameters[
-                "train_random_forest_regressor_param_criterion"
-            ],
-            "max_depth": metaparameters[
-                "train_random_forest_regressor_param_max_depth"
-            ],
-            "min_samples_split": metaparameters[
-                "train_random_forest_regressor_param_min_samples_split"
-            ],
-            "min_samples_leaf": metaparameters[
-                "train_random_forest_regressor_param_min_samples_leaf"
-            ],
-            "min_weight_fraction_leaf": metaparameters[
-                "train_random_forest_regressor_param_min_weight_fraction_leaf"
-            ],
-            "max_features": metaparameters[
-                "train_random_forest_regressor_param_max_features"
-            ],
-            "min_impurity_decrease": metaparameters[
-                "train_random_forest_regressor_param_min_impurity_decrease"
-            ],
-        }
 
     def write_metaparameters(self):
         metaparameters = {
-            "infer_cyber_model_skew": self.model_skew["__all__"],
             "train_input_features": self.input_features,
-            "train_weight_table_random_state": self.weight_table_params["random_seed"],
-            "train_weight_table_params_mean": self.weight_table_params["mean"],
-            "train_weight_table_params_std": self.weight_table_params["std"],
-            "train_weight_table_params_scaler": self.weight_table_params["scaler"],
-            "train_random_forest_regressor_param_n_estimators": self.random_forest_kwargs["n_estimators"],
-            "train_random_forest_regressor_param_criterion": self.random_forest_kwargs["criterion"],
-            "train_random_forest_regressor_param_max_depth": self.random_forest_kwargs["max_depth"],
-            "train_random_forest_regressor_param_min_samples_split": self.random_forest_kwargs["min_samples_split"],
-            "train_random_forest_regressor_param_min_samples_leaf": self.random_forest_kwargs["min_samples_leaf"],
-            "train_random_forest_regressor_param_min_weight_fraction_leaf": self.random_forest_kwargs["min_weight_fraction_leaf"],
-            "train_random_forest_regressor_param_max_features": self.random_forest_kwargs["max_features"],
-            "train_random_forest_regressor_param_min_impurity_decrease": self.random_forest_kwargs["min_impurity_decrease"],
         }
 
         with open(join(self.learned_parameters_dirpath, basename(self.metaparameter_filepath)), "w") as fp:
@@ -302,9 +402,10 @@ class Detector(AbstractDetector):
         Args:
             models_dirpath: str - Path to the list of model to use for training
         """
-        for random_seed in np.random.randint(1000, 9999, 10):
-            self.weight_table_params["random_seed"] = random_seed
-            self.manual_configure(models_dirpath)
+        #for random_seed in np.random.randint(1000, 9999, 10):
+        #    self.weight_table_params["random_seed"] = random_seed
+        #    self.manual_configure(models_dirpath)
+        self.input_features = 100
 
     def manual_configure(self, models_dirpath: str):
         """Configuration of the detector using the parameters from the metaparameters
@@ -323,20 +424,8 @@ class Detector(AbstractDetector):
 
         model_repr_dict, model_ground_truth_dict, model_dirpath_dict = load_models_dirpath(model_path_list)
 
-        dataset = list()
-
-        for p in model_path_list:
-            if p.endswith('id-00000027'): #100% acc on clean examples
-                break
-        model_filepath = os.path.join(p,'model.pt')
-        model, model_repr, model_class = load_model(model_filepath)
-        reference_model = copy.deepcopy(model_repr)
-        path = join(self.learned_parameters_dirpath, "reference_model.pkl")
-        logging.info(f"Writing reference model to {path}")
-        with open(path, 'wb') as fp:
-            pickle.dump(reference_model, fp)
-
-        clean_dataset, poison_dataset = read_all_examples(model_dir=models_dirpath, out_folder=self.learned_parameters_dirpath)
+        #==================gather clean inputs============================
+        clean_dataset, poison_dataset = read_all_examples(model_dir=models_dirpath, out_folder=self.learned_parameters_dirpath, scaler_path=self.scale_parameters_filepath)
 
         path = join(self.learned_parameters_dirpath, "clean_data.pkl")
         with open(path,'rb') as fh:
@@ -345,26 +434,39 @@ class Detector(AbstractDetector):
         good_ids = clean_labels==0
         good_inputs = clean_inputs[good_ids]
 
-        scaler = StandardScaler()
 
-        scale_params = np.load(self.scale_parameters_filepath)
-        scaler.mean_ = scale_params[0]
-        scaler.scale_ = scale_params[1]
+        #==================store reference model============================
+        for p in model_path_list:
+            if p.endswith('id-00000027'): #100% acc on clean examples
+                break
+        model_filepath = os.path.join(p,'model.pt')
+        ref_feats = feature_extraction(model_filepath, good_inputs, model_repr=None, model_class=None, ref_feats=None)
 
-        for i in range(len(good_inputs)):
-            x = good_inputs[i].reshape(1,-1)
-            tx = scaler.transform(x.astype(float))
-            good_inputs[i] = tx
+        path = join(self.learned_parameters_dirpath, "reference_model.pkl")
+        logging.info(f"Writing reference model to {path}")
+        with open(path, 'wb') as fp:
+            pickle.dump(ref_feats, fp)
 
 
+        dataset = list()
         for model_class, model_list in model_repr_dict.items():
-            for model, label, md_path in zip(model_list, model_ground_truth_dict[model_class], model_dirpath_dict[model_class]):
+            for model_repr, label, md_path in zip(model_list, model_ground_truth_dict[model_class], model_dirpath_dict[model_class]):
 
-                model_feats = feature_extraction(model, reference=reference_model, good_inputs=good_inputs, md_path=os.path.join(md_path,'model.pt'))
+                print(label, md_path)
 
-                dataset.append([model_feats, label])
+                model_filepath = os.path.join(md_path, 'model.pt')
+                aligned_feats = feature_extraction(model_filepath, good_inputs, model_repr=model_repr, model_class=model_class, ref_feats=ref_feats)
 
-        # feat_id = correlation_select(dataset)
+                dataset.append([aligned_feats, label])
+
+        feat_id = correlation_select(dataset, num_feats=self.input_features)
+
+        path = join(self.learned_parameters_dirpath, "feat_id.pkl")
+        logging.info(f"Writing feat id to {path}")
+        with open(path, 'wb') as fp:
+            pickle.dump(feat_id, fp)
+
+        dataset = trim_dataset_according_id(dataset, feat_id)
 
         kfold_validation(k_fold=4, dataset=dataset, train_fn=train_fn, test_fn=test_fn, configs=None)
 
@@ -497,10 +599,22 @@ class Detector(AbstractDetector):
         logging.info("Loaded models. Flattenning...")
         '''
 
+        path = join(self.learned_parameters_dirpath, "clean_data.pkl")
+        with open(path,'rb') as fh:
+            clean_dataset = pickle.load(fh)
+        clean_inputs, clean_labels = clean_dataset
+        good_ids = clean_labels==0
+        good_inputs = clean_inputs[good_ids]
+
         path = join(self.learned_parameters_dirpath, "reference_model.pkl")
         logging.info(f"Loading reference model from {path}")
         with open(path, 'rb') as fp:
-            reference_model = pickle.load(fp)
+            ref_feats = pickle.load(fp)
+
+        path = join(self.learned_parameters_dirpath, "feat_id.pkl")
+        logging.info(f"loading feat id from {path}")
+        with open(path, 'rb') as fp:
+            feat_id = pickle.load(fp)
 
         '''
 
@@ -519,31 +633,13 @@ class Detector(AbstractDetector):
         layer_transform = fit_feature_reduction_algorithm(flat_models, self.weight_table_params, self.input_features)
         '''
 
-        model, model_repr, model_class = load_model(model_filepath)
+        aligned_feats = feature_extraction(model_filepath, good_inputs, model_repr=None, model_class=None, ref_feats=ref_feats)
+        X = aligned_feats[:, feat_id]
+        # model, model_repr, model_class = load_model(model_filepath)
         # model_repr = pad_model(model_repr, model_class, models_padding_dict)
         # flat_model = flatten_model(model_repr, model_layer_map[model_class])
 
 
-        path = join(self.learned_parameters_dirpath, "clean_data.pkl")
-        with open(path,'rb') as fh:
-            clean_dataset = pickle.load(fh)
-        clean_inputs, clean_labels = clean_dataset
-        good_ids = clean_labels==0
-        good_inputs = clean_inputs[good_ids]
-
-        scaler = StandardScaler()
-
-        scale_params = np.load(self.scale_parameters_filepath)
-        scaler.mean_ = scale_params[0]
-        scaler.scale_ = scale_params[1]
-
-        for i in range(len(good_inputs)):
-            x = good_inputs[i].reshape(1,-1)
-            tx = scaler.transform(x.astype(float))
-            good_inputs[i] = tx
-
-
-        X = feature_extraction(model_repr, reference=reference_model, good_inputs=good_inputs, md_path=model_filepath)
 
         # Inferences on examples to demonstrate how it is done for a round
         # This is not needed for the random forest classifier

@@ -1,8 +1,10 @@
 import os
 import pickle
+from sklearn.preprocessing import StandardScaler
 import numpy as np
 import json
 import torch
+
 
 HOME = os.getenv('HOME')
 ROOT = os.path.join(HOME, 'share/trojai')
@@ -10,7 +12,7 @@ ROUND = os.path.join(ROOT, 'round12')
 PHRASE = os.path.join(ROUND, 'cyber-pdf-dec2022-train')
 MODELDIR = os.path.join(PHRASE, 'models')
 
-def read_data_folder(folder_path):
+def read_data_folder(folder_path, scaler):
     X, y, na = list(), list(), list()
     fs = os.listdir(folder_path)
     fs.sort()
@@ -23,7 +25,9 @@ def read_data_folder(folder_path):
         with open(p) as fh:
             label = json.load(fh)
 
-        X.append(data)
+        data = data.reshape(1,-1)
+        tdata = scaler.transform(data)
+        X.append(tdata.astype(np.float32))
         y.append(label)
         na.append('.'.join(fn.split('.')[:-1]))
 
@@ -31,34 +35,31 @@ def read_data_folder(folder_path):
     md_path = os.path.join(fo,'model.pt')
     model = torch.load(md_path)
 
+    X = np.concatenate(X, axis=0)
     y = np.asarray(y)
-    X = np.asarray(X, dtype=np.float32)
-    X_tensor = torch.from_numpy(X)
-    logits = model(X_tensor)
-    preds = torch.argmax(logits, axis=1).detach().cpu().numpy()
-    print(y)
-    print(preds)
-    acc = np.sum(preds==y)/len(y)
-    print(folder_path)
-    print(acc)
 
-    return X, y, na, acc
+    return X, y, na
 
 
 
-def read_all_examples(model_dir=None, out_folder=None):
+def read_all_examples(model_dir=None, out_folder=None, scaler_path=None):
     if model_dir is None:
         model_dir = MODELDIR
     if out_folder is None:
         out_folder = './learned_parameters'
+    if scaler_path is None:
+        scaler_path = './scale_params.npy'
+
+    scaler = StandardScaler()
+    scale_params = np.load(scaler_path)
+    scaler.mean_ = scale_params[0]
+    scaler.scale_ = scale_params[1]
 
     clean_data, clean_label, clean_name = list(), list(), dict()
     poison_data, poison_label, poison_name = list(), list(), dict()
     mds = os.listdir(model_dir)
     mds.sort()
 
-    acc_list = list()
-    asr_list = list()
     for md in mds:
         if not md.startswith('id-'): continue
         md_path = os.path.join(MODELDIR, md)
@@ -66,24 +67,17 @@ def read_all_examples(model_dir=None, out_folder=None):
         fds = os.listdir(md_path)
         for fd in fds:
             if fd.endswith('example-data'):
-                data, label, name, acc = read_data_folder(os.path.join(md_path, fd))
+                data, label, name = read_data_folder(os.path.join(md_path, fd), scaler)
                 if fd.startswith('clean'):
                     da, lb, na = clean_data, clean_label, clean_name
-                    acc_list.append(acc)
                 else:
                     da, lb, na = poison_data, poison_label, poison_name
-                    asr_list.append(acc)
 
                 for d, l, n in zip(data, label, name):
                     if n in na: continue
                     na[n] = len(da)
                     da.append(d)
                     lb.append(l)
-
-    print('avg acc', np.mean(acc_list), np.min(acc_list), np.max(acc_list))
-    print('avg asr', np.mean(asr_list), np.min(asr_list), np.max(asr_list))
-    # exit(0)
-
 
     clean_data = np.asarray(clean_data)
     clean_label = np.asarray(clean_label)
@@ -138,7 +132,6 @@ def test_all_models():
 
 
 if __name__ == '__main__':
-    clean_dataset, poison_dataset = read_all_examples()
+    pass
+    # clean_dataset, poison_dataset = read_all_examples()
     #test_all_models()
-
-
