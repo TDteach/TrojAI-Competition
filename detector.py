@@ -384,11 +384,11 @@ class Detector(AbstractDetector):
         self.layer_transform_filepath = join(self.learned_parameters_dirpath, "layer_transform.bin")
 
         # TODO: Update skew parameters per round
-        self.input_features = metaparameters["train_input_features"]
+        self.number_features = metaparameters["train_number_features"]
 
     def write_metaparameters(self):
         metaparameters = {
-            "train_input_features": self.input_features,
+            "train_number_features": self.number_features,
         }
 
         with open(join(self.learned_parameters_dirpath, basename(self.metaparameter_filepath)), "w") as fp:
@@ -405,7 +405,7 @@ class Detector(AbstractDetector):
         #for random_seed in np.random.randint(1000, 9999, 10):
         #    self.weight_table_params["random_seed"] = random_seed
         #    self.manual_configure(models_dirpath)
-        self.input_features = 100
+        self.number_features = 100
 
     def manual_configure(self, models_dirpath: str):
         """Configuration of the detector using the parameters from the metaparameters
@@ -459,7 +459,7 @@ class Detector(AbstractDetector):
 
                 dataset.append([aligned_feats, label])
 
-        feat_id = correlation_select(dataset, num_feats=self.input_features)
+        feat_id = correlation_select(dataset, num_feats=self.number_features)
 
         path = join(self.learned_parameters_dirpath, "feat_id.pkl")
         logging.info(f"Writing feat id to {path}")
