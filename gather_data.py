@@ -1,6 +1,5 @@
 import os
 import pickle
-from sklearn.preprocessing import StandardScaler
 import numpy as np
 import json
 import torch
@@ -12,7 +11,7 @@ ROUND = os.path.join(ROOT, 'round12')
 PHRASE = os.path.join(ROUND, 'cyber-pdf-dec2022-train')
 MODELDIR = os.path.join(PHRASE, 'models')
 
-def read_data_folder(folder_path, scaler):
+def read_data_folder(folder_path):
     X, y, na = list(), list(), list()
     fs = os.listdir(folder_path)
     fs.sort()
@@ -26,8 +25,8 @@ def read_data_folder(folder_path, scaler):
             label = json.load(fh)
 
         data = data.reshape(1,-1)
-        tdata = scaler.transform(data)
-        X.append(tdata.astype(np.float32))
+        # tdata = scaler.transform(data)
+        X.append(data.astype(np.float32))
         y.append(label)
         na.append('.'.join(fn.split('.')[:-1]))
 
@@ -42,18 +41,11 @@ def read_data_folder(folder_path, scaler):
 
 
 
-def read_all_examples(model_dir=None, out_folder=None, scaler_path=None):
+def read_all_examples(model_dir=None, out_folder=None):
     if model_dir is None:
         model_dir = MODELDIR
     if out_folder is None:
-        out_folder = './learned_parameters'
-    if scaler_path is None:
-        scaler_path = './scale_params.npy'
-
-    scaler = StandardScaler()
-    scale_params = np.load(scaler_path)
-    scaler.mean_ = scale_params[0]
-    scaler.scale_ = scale_params[1]
+        out_folder = 'learned_parameters'
 
     clean_data, clean_label, clean_name = list(), list(), dict()
     poison_data, poison_label, poison_name = list(), list(), dict()
@@ -67,7 +59,7 @@ def read_all_examples(model_dir=None, out_folder=None, scaler_path=None):
         fds = os.listdir(md_path)
         for fd in fds:
             if fd.endswith('example-data'):
-                data, label, name = read_data_folder(os.path.join(md_path, fd), scaler)
+                data, label, name = read_data_folder(os.path.join(md_path, fd))
                 if fd.startswith('clean'):
                     da, lb, na = clean_data, clean_label, clean_name
                 else:

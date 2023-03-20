@@ -17,8 +17,10 @@ python entrypoint.py configure \
     --schema_filepath ./metaparameters_schema.json \
     --learned_parameters_dirpath ./learned_parameters/ \
     --configure_models_dirpath $MODELDIR \
-    --scale_parameters_filepath ./scale_params.npy
+    --scale_parameters_filepath ./scale_params.npy \
+#    --automatic_configuration
 
+exit
 
 #echo "rm learned_parameters"
 #rm -rf learned_parameters

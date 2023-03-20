@@ -1,19 +1,20 @@
 {
-  "title": "TrojAI Competition Gradient on Inputs Attempt",
-  "technique": "LightGBM classifier",
-  "technique_description": "Calculate the gradient of class 1 w.r.t inputs, then use LGBM to do the classification",
-  "technique_changes": "Output metaparameter.json file after reconfiguration",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TrojAI Competition Gradient on Inputs Attempt v0",
+  "technique": "LightGBM classifier v0",
+  "technique_description": "Calculate the gradient of class 1 w.r.t inputs, then use LGBM to do the classification v0",
+  "technique_changes": "Leverage LGBM to do the classification v0",
   "commit_id": "5535842310aa5cb9b577e90bb1427484c89dfefb",
   "repo_name": "https://github.com/TDteach/TrojAI-Competition.git",
   "additionalProperties": false,
   "type": "object",
-  "required": ["train_number_features"],
+  "required": [],
   "properties": {
 	"train_number_features":  {
 		"description": "The number of  features used in training.",
 		"type": "integer",
 		"minimum": 32,
-		"maximum": 128,
+		"maximum": 1000,
 		"suggested_minimum": 32,
 		"suggested_maximum": 128
 	}

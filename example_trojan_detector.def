@@ -14,10 +14,14 @@ From: pytorch/pytorch:1.13.1-cuda11.6-cudnn8-runtime
 
 %post
     apt update
+    apt -y install build-essential swig python3-dev
 
     pip install --upgrade pip
+    pip install numpy -U
+    pip install auto-sklearn
     pip install tqdm jsonschema jsonargparse scikit-learn
     pip install lightgbm
+    
 
 %runscript
     exec python3 /entrypoint.py "$@"
