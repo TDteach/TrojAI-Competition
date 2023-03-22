@@ -1,8 +1,8 @@
 #!/bin/bash
 
 ROOT=$HOME/share/trojai
-ROUND=$ROOT/round12
-PHRASE=$ROUND/cyber-pdf-dec2022-train
+ROUND=$ROOT/round13
+PHRASE=$ROUND/object-detection-feb2023-train
 MODELDIR=$PHRASE/models
 
 
@@ -11,13 +11,18 @@ MODELDIR=$PHRASE/models
 
 # python3 example_trojan_detector.py --model_filepath $MODELDIR/id-00000001/model.pt --round_training_dataset_dirpath $MODELDIR
 
+echo $1
+
+if [ $(( $1 & 1 )) -gt 0 ]
+then
 python entrypoint.py configure \
+    --automatic_configuration \
     --scratch_dirpath ./scratch/ \
     --metaparameters_filepath ./metaparameters.json \
     --schema_filepath ./metaparameters_schema.json \
     --learned_parameters_dirpath ./learned_parameters/ \
-    --configure_models_dirpath $MODELDIR \
-    --scale_parameters_filepath ./scale_params.npy
+    --configure_models_dirpath $MODELDIR
+fi
 
 
 #echo "rm learned_parameters"
@@ -25,16 +30,18 @@ python entrypoint.py configure \
 #echo "mv new_learned_parameters to learned_parameters"
 #mv new_learned_parameters learned_parameters
 
+if [ $(( $1 & 2 )) -gt 0 ]
+then
 python entrypoint.py infer \
-    --model_filepath $MODELDIR/id-00000000/model.pt \
+    --model_filepath $MODELDIR/id-00000100/model.pt \
     --result_filepath ./scratch/output.txt \
     --scratch_dirpath ./scratch \
-    --examples_dirpath $MODELDIR/id-00000000/clean-example-data \
+    --examples_dirpath $MODELDIR/id-00000100/clean-example-data \
     --round_training_dataset_dirpath $PHRASE \
     --learned_parameters_dirpath ./learned_parameters \
     --metaparameters_filepath ./metaparameters.json \
-    --schema_filepath ./metaparameters_schema.json \
-    --scale_parameters_filepath ./scale_params.npy
+    --schema_filepath ./metaparameters_schema.json
+fi
 
 
 

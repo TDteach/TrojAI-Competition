@@ -1,34 +1,44 @@
-import json
+# NIST-developed software is provided by NIST as a public service. You may use, copy and distribute copies of the software in any medium, provided that you keep intact this entire notice. You may improve, modify and create derivative works of the software or any portion of the software, and you may copy and distribute such modifications or works. Modified works should carry a notice stating that you changed the software and should note the date and nature of any such change. Please explicitly acknowledge the National Institute of Standards and Technology as the source of the software.
+
+# NIST-developed software is expressly provided "AS IS." NIST MAKES NO WARRANTY OF ANY KIND, EXPRESS, IMPLIED, IN FACT OR ARISING BY OPERATION OF LAW, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTY OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT AND DATA ACCURACY. NIST NEITHER REPRESENTS NOR WARRANTS THAT THE OPERATION OF THE SOFTWARE WILL BE UNINTERRUPTED OR ERROR-FREE, OR THAT ANY DEFECTS WILL BE CORRECTED. NIST DOES NOT WARRANT OR MAKE ANY REPRESENTATIONS REGARDING THE USE OF THE SOFTWARE OR THE RESULTS THEREOF, INCLUDING BUT NOT LIMITED TO THE CORRECTNESS, ACCURACY, RELIABILITY, OR USEFULNESS OF THE SOFTWARE.
+
+# You are solely responsible for determining the appropriateness of using and distributing the software and you assume all risks associated with its use, including but not limited to the risks and costs of program errors, compliance with applicable laws, damage to or loss of data, programs or equipment, and the unavailability or interruption of operation. This software is not intended to be used in any situation where a failure could cause risk of injury or damage to property. The software developed by NIST employees is not subject to copyright protection within the United States.
+
+
 import logging
 import os
+import json
+import jsonpickle
 import pickle
-from os import listdir, makedirs
-from os.path import join, exists, basename
-
 import numpy as np
-from sklearn.ensemble import RandomForestRegressor
-from tqdm import tqdm
 
+from sklearn.ensemble import RandomForestRegressor
+
+import utils.models
 from utils.abstract import AbstractDetector
+from utils.models import load_model, load_models_dirpath, create_layer_map
 from utils.flatten import flatten_model, flatten_models
 from utils.healthchecks import check_models_consistency
-from utils.models import create_layer_map, load_model, \
-    load_models_dirpath
 from utils.padding import create_models_padding, pad_model
 from utils.reduction import (
     fit_feature_reduction_algorithm,
     use_feature_reduction_algorithm,
 )
 
-from archs import Net2, Net3, Net4, Net5, Net6, Net7, Net2r, Net3r, Net4r, Net5r, Net6r, Net7r, Net2s, Net3s, Net4s, Net5s, Net6s, Net7s
 import torch
+import torchvision
+import skimage.io
 
-from gather_data import read_all_examples
 
 import copy
 from sklearn.model_selection import KFold
 from sklearn.svm import SVC
-from sklearn.metrics import roc_auc_score
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.experimental import enable_hist_gradient_boosting
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import ExtraTreesClassifier
+from sklearn.metrics import roc_auc_score, log_loss
 
 from torch.autograd import Variable
 from torch.autograd import grad as torch_grad
@@ -37,6 +47,10 @@ import torch.nn.functional as F
 import lightgbm as lgb
 
 from collections import OrderedDict
+from sklearn.preprocessing import StandardScaler
+
+from scipy.special import softmax
+from tqdm import tqdm
 
 
 def ext_quantiles(a, bins=100):
@@ -44,39 +58,10 @@ def ext_quantiles(a, bins=100):
     return np.quantile(a, qs)
 
 
-def align_weight(weight, target):
-    flat_weight = weight.flatten()
-    flat_target = target.flatten()
-    mean_weight = np.mean(flat_weight)
-    std_weight = np.std(flat_weight)
-    mean_target = np.mean(flat_target)
-    std_target = np.std(flat_target)
-
-    weight = (weight-mean_weight)/std_weight
-    target = (target-mean_target)/std_target
-
-
-    w_T = np.transpose(weight)
-    Z = np.matmul(w_T, target)
-    u, s, vh = np.linalg.svd(Z)
-    H = np.matmul(u[:, :vh.shape[0]], vh)
-
-    trans_w = np.matmul(weight, H)
-
-    # trans_w = trans_w*std_weight + mean_weight
-
-    '''
-    w_inv = np.linalg.pinv(weight)
-    M = np.matmul(w_inv, target)
-    trans_w = np.matmul(weight, M)
-    '''
-    return trans_w
-
-
-
-def get_forward_hook_fn(k, embed_list):
+def get_forward_hook_fn(k, in_list, out_list):
     def hook_fn(module, input, output):
-        embed_list[k] = output.detach().cpu().numpy()
+        in_list[k] = input[0].detach().cpu().numpy()
+        out_list[k] = output.detach().cpu().numpy()
 
     return hook_fn
 
@@ -89,16 +74,17 @@ def get_backward_hook_fn(k, grad_list):
 def extract_runtime_features(model, inputs):
     child_list = list(model.children())
     n_child = len(child_list)
-    embed_list = [None] * n_child
+    mid_in_list = [None] * n_child
+    mid_out_list = [None] * n_child
     grad_list = [None] * n_child
     hook_handler_list = list()
     for k, m in enumerate(model.children()):
-        handler = m.register_forward_hook(get_forward_hook_fn(k, embed_list))
+        handler = m.register_forward_hook(get_forward_hook_fn(k, mid_in_list, mid_out_list))
         hook_handler_list.append(handler)
-        handler = m.register_backward_hook(get_backward_hook_fn(k, grad_list))
+        handler = m.register_full_backward_hook(get_backward_hook_fn(k, grad_list))
         hook_handler_list.append(handler)
 
-    label_tensor = torch.ones(len(inputs), dtype=torch.int64)
+    label_tensor = torch.ones(len(inputs), dtype=torch.int64) * 0
     input_tensor = torch.from_numpy(inputs)
     input_variable = Variable(input_tensor, requires_grad=True)
     logits = model(input_variable)
@@ -109,7 +95,14 @@ def extract_runtime_features(model, inputs):
     for handler in hook_handler_list:
         handler.remove()
 
-    embed_list.append(inputs)
+    grad_list.append(input_variable.grad.detach().cpu().numpy())
+
+    label_tensor = torch.ones(len(inputs), dtype=torch.int64) * 1
+    input_tensor = torch.from_numpy(inputs)
+    input_variable = Variable(input_tensor, requires_grad=True)
+    logits = model(input_variable)
+    loss = F.cross_entropy(logits, label_tensor)
+    loss.backward()
     grad_list.append(input_variable.grad.detach().cpu().numpy())
 
     para_grads = OrderedDict(
@@ -117,59 +110,74 @@ def extract_runtime_features(model, inputs):
     )
 
     return {
-        'mid_outs': embed_list,
+        'mid_ins': mid_in_list,
+        'mid_outs': mid_out_list,
         'mid_grads': grad_list,
         'para_grads': para_grads,
     }
 
 
+
+def CKA(X, Y):
+    assert len(X)==len(Y)
+
+    n = len(X)
+    d = (n-1)**2
+
+    mX = X - np.mean(X, axis=0)
+    mY = Y - np.mean(Y, axis=0)
+
+    XX = np.matmul(mX, mX.transpose())
+    YY = np.matmul(mY, mY.transpose())
+
+    u = np.trace(np.matmul(XX,YY))/d
+    d1 = np.trace(np.matmul(XX,XX))/d
+    d2 = np.trace(np.matmul(YY,YY))/d
+
+    return u/np.sqrt(d1*d2)
+
+
 def extract_aligned_features(model_feats, ref_feats):
     src_repr, tgt_repr = model_feats['model_repr'], ref_feats['model_repr']
+    src_repr_names, tgt_repr_names = list(src_repr.keys()), list(tgt_repr.keys())
+    src_ins, tgt_ins = model_feats['runtime_feats']['mid_ins'], ref_feats['runtime_feats']['mid_ins']
     src_outs, tgt_outs = model_feats['runtime_feats']['mid_outs'], ref_feats['runtime_feats']['mid_outs']
+    src_grads, tgt_grads = model_feats['runtime_feats']['mid_grads'], ref_feats['runtime_feats']['mid_grads']
 
-    src_o, tgt_o = src_outs[0], tgt_outs[0]
 
-    ns_list, nt_list = list(), list()
-    for s, t in zip(src_o, tgt_o):
-        ns, nt = np.linalg.norm(s), np.linalg.norm(t)
-        ns_list.append(ns)
-        nt_list.append(nt)
-    ns_list=np.asarray(ns_list)
-    nt_list=np.asarray(nt_list)
+    g0, g1 = np.mean(src_grads[-2][:10, :],axis=0), np.mean(src_grads[-1][:10, :],axis=0) # 0 w.r.t good,  1 w.r.t good
+    g2, g3 = np.mean(src_grads[-2][10:, :],axis=0), np.mean(src_grads[-1][10:, :],axis=0) # 0 w.r.t bad,   1 w.r.t bad
 
-    dvd = nt_list/ns_list
-    mean_sc = np.mean(dvd)
+    gg = np.asarray([g0,g1,g2,g3])
+    Z = np.matmul(gg, gg.transpose())
 
-    src_o = src_o * mean_sc
-    Z = np.matmul(src_o.transpose(), tgt_o)
-    u, s, vh = np.linalg.svd(Z)
-    M = np.matmul(u[:, :vh.shape[0]], vh)
+    g0 /= np.linalg.norm(g0)
+    g1 /= np.linalg.norm(g1)
+    g2 /= np.linalg.norm(g2)
+    g3 /= np.linalg.norm(g3)
+    gg = np.stack([g0, g1, g2, g3]).reshape(1,-1)
 
-    '''
-    o_inv = np.linalg.pinv(src_o)
-    M = np.matmul(o_inv, tgt_o)
-    mean_sc = 1.0
-    '''
-    mean_sc = 1.0
 
-    src_repr_names = list(src_repr.keys())
-    src_w_name = src_repr_names[0]
-    src_w = src_repr[src_w_name]
-    src_w = src_w[:, :10]
-    ali_src_w = np.matmul(M.transpose(), src_w * mean_sc)
+    a = None
+    for i in range(0, len(src_repr_names), 2):
+        w = src_repr[src_repr_names[i]]
+        if a is None:
+            a = w.transpose()
+        else:
+            a = np.matmul(a, w.transpose())
+    z = a[:, 0]
+    z /= np.linalg.norm(z)
+    feats = z.reshape(1,-1)
 
-    tgt_repr_names = list(tgt_repr.keys())
-    tgt_w_name = tgt_repr_names[0]
-    tgt_w = tgt_repr[tgt_w_name]
-    tgt_w = tgt_w[:, :10]
+    #return feats
 
-    diff_w = tgt_w - ali_src_w
 
-    feats = ali_src_w.flatten()
-    feats = np.expand_dims(feats,axis=0)
+    #ggg = np.asarray([g2[8], g3[8], feats[0,8], Z[3,3], Z[3,2], Z[2,2]])
+    #return np.expand_dims(ggg, axis=0)
 
-    return feats
 
+    ggg = np.concatenate([gg, Z.reshape(1,-1), feats], axis=1)
+    return ggg
 
 
 def feature_extraction(model, inputs, model_repr=None, model_class=None, ref_feats=None):
@@ -200,199 +208,95 @@ def feature_extraction(model, inputs, model_repr=None, model_class=None, ref_fea
 
 
 
-    model = torch.load(md_path)
-    model.eval()
-    label_tensor = torch.ones(len(good_inputs),dtype=torch.int64)
-    input_tensor = torch.from_numpy(good_inputs)
-    input_variable = Variable(input_tensor, requires_grad=True)
-    logits = model(input_variable)
-    preds = torch.argmax(logits,axis=-1)
-    loss = F.cross_entropy(logits, label_tensor)
-    loss.backward()
-
-    fet = input_variable.grad.numpy()
-    fet = np.average(fet, axis=0)
-    fet = np.expand_dims(fet,0)
-    return fet
 
 
 
 
-    layer_name = list(reference.keys())[-4]
-    ref_weight = reference[layer_name]
-    layer_name = list(model.keys())[-4]
-    w_ori = model[layer_name]
-    weight = np.copy(w_ori)
-
-    weight = align_weight(weight, ref_weight)
-
-    n = weight.shape[0]
-    # s_list = list()
-    for i in range(n):
-        a = weight[i]
-        # s_list.append(np.sum(a))
-        # a -= np.mean(a)
-        # a /= np.std(a)
-        # weight[i] = a
-    # order = np.argsort(s_list)
-
-    feat = list()
-    # w = weight[order]
-    # w = weight
-    # for i in range(n):
-    #    # w[i] /= np.linalg.norm(w[i])
-    #    feat.append(ext_quantiles(w[i], bins=16))
-    feat.append(ext_quantiles(weight[i].flatten(), bins=128))
-    feat.append(ext_quantiles(np.abs(weight[i]).flatten(), bins=128))
-    feat = np.concatenate(feat, axis=0)
-    feat = np.expand_dims(feat,0)
-    return feat
-
-
-def kfold_validation(k_fold, dataset, train_fn, test_fn, configs):
-    kfold = KFold(n_splits=k_fold, shuffle=True)
-
-    labels = [data[1] for data in dataset]
-
-    probs = np.zeros(len(dataset))
-    for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
-        logging.info(f"FOLD {fold}")
-        logging.info('-'*40)
-
-        train_dataset = [dataset[i] for i in train_ids]
-        test_dataset = [dataset[i] for i in test_ids]
-
-        model, train_rst = train_fn(train_dataset, configs)
-        test_rst = test_fn(model, test_dataset, configs)
-
-        _probs = test_rst['probs']
-        for k, i in enumerate(test_ids):
-            probs[i] = _probs[k]
-
-    auc = roc_auc_score(labels, probs)
-    logging.info(f"Cross Validation AUC: {auc:3f}")
-
-    model, train_rst = train_fn(dataset, configs)
-
-    rst_dict = {
-        'probs': probs,
-        'labs': labels,
-        'auc': auc,
-        'model': model,
-    }
-
-    return rst_dict
-
-
-def train_fn(dataset, configs):
-    X = [data[0] for data in dataset]
-    y = [data[1] for data in dataset]
-    X = np.concatenate(X, axis=0)
-    y = np.asarray(y)
-
-    clf = SVC(probability=True)
-    # clf = lgb.LGBMClassifier(max_depth=2)
-    clf.fit(X,y)
-
-    preds = clf.predict(X)
-    train_acc = np.sum(preds == y)/ len(y)
-    logging.info("Train ACC: {:.3f}%".format(train_acc*100))
-
-    train_rst = {
-        'train_acc': train_acc
-    }
-
-    return clf, train_rst
-
-
-def test_fn(model, dataset, configs):
-    X = [data[0] for data in dataset]
-    y = [data[1] for data in dataset]
-    X = np.concatenate(X, axis=0)
-    y = np.asarray(y)
-
-    preds = model.predict(X)
-    probs = model.predict_proba(X)
-    test_acc = np.sum(preds == y)/len(y)
-    logging.info(f"Test ACC: {test_acc*100:.3f}%")
-
-    test_rst = {
-        'acc': test_acc,
-        'probs': probs[:,1],
-        'labs': y,
-    }
-    return test_rst
-
-
-def correlation_select(dataset, num_feats=100):
-    X, y = list(), list()
-    for data, label in dataset:
-        X.append(data)
-        y.append(label)
-    X = np.concatenate(X, axis=0)
-    y = np.asarray(y)
-
-    corr_list = list()
-    for j in range(X.shape[1]):
-        rst = np.corrcoef(X[:, j], y)[0,1]
-        corr_list.append(rst)
-
-    order = np.argsort(np.abs(corr_list))
-    order = np.flip(order)
-
-    for o in order:
-        print(o, corr_list[o])
-
-    return order[:num_feats]
-
-
-def trim_dataset_according_id(dataset, feat_id):
-    X, y = list(), list()
-    for data, label in dataset:
-        X.append(data)
-        y.append(label)
-    X = np.concatenate(X, axis=0)
-    y = np.asarray(y)
-
-    tX = X[:, feat_id]
-
-    new_dataset = list()
-    for i in range(len(y)):
-        new_dataset.append([tX[i:i+1,:], y[i]])
-
-    return new_dataset
-
+def center_to_corners_format(x):
+    """
+    Converts a PyTorch tensor of bounding boxes of center format (center_x, center_y, width, height) to corners format
+    (x_0, y_0, x_1, y_1).
+    """
+    x_c, y_c, w, h = x.unbind(-1)
+    b = [(x_c - (0.5 * w)), (y_c - (0.5 * h)), (x_c + (0.5 * w)), (y_c + (0.5 * h))]
+    return torch.stack(b, dim=-1)
 
 
 class Detector(AbstractDetector):
-    def __init__(self, metaparameter_filepath, learned_parameters_dirpath, scale_parameters_filepath):
+    def __init__(self, metaparameter_filepath, learned_parameters_dirpath):
         """Detector initialization function.
 
         Args:
             metaparameter_filepath: str - File path to the metaparameters file.
             learned_parameters_dirpath: str - Path to the learned parameters directory.
-            scale_parameters_filepath: str - File path to the scale_parameters file.
         """
         metaparameters = json.load(open(metaparameter_filepath, "r"))
 
-        self.scale_parameters_filepath = scale_parameters_filepath
         self.metaparameter_filepath = metaparameter_filepath
         self.learned_parameters_dirpath = learned_parameters_dirpath
-        self.model_filepath = join(self.learned_parameters_dirpath, "model.bin")
-        self.models_padding_dict_filepath = join(self.learned_parameters_dirpath, "models_padding_dict.bin")
-        self.model_layer_map_filepath = join(self.learned_parameters_dirpath, "model_layer_map.bin")
-        self.layer_transform_filepath = join(self.learned_parameters_dirpath, "layer_transform.bin")
+        self.model_filepath = os.path.join(self.learned_parameters_dirpath, "model.bin")
+        self.models_padding_dict_filepath = os.path.join(self.learned_parameters_dirpath, "models_padding_dict.bin")
+        self.model_layer_map_filepath = os.path.join(self.learned_parameters_dirpath, "model_layer_map.bin")
+        self.layer_transform_filepath = os.path.join(self.learned_parameters_dirpath, "layer_transform.bin")
 
-        # TODO: Update skew parameters per round
-        self.number_features = metaparameters["train_number_features"]
+        self.input_features = metaparameters["train_input_features"]
+        self.weight_params = {
+            "rso_seed": metaparameters["train_weight_rso_seed"],
+            "mean": metaparameters["train_weight_params_mean"],
+            "std": metaparameters["train_weight_params_std"],
+        }
+        self.weight_table_params = {
+            "random_seed": metaparameters["train_weight_rso_seed"],
+            "mean": metaparameters["train_weight_params_mean"],
+            "std": metaparameters["train_weight_params_std"],
+            "scaler": 1.0,
+        }
+        self.random_forest_kwargs = {
+            "n_estimators": metaparameters[
+                "train_random_forest_regressor_param_n_estimators"
+            ],
+            "criterion": metaparameters[
+                "train_random_forest_regressor_param_criterion"
+            ],
+            "max_depth": metaparameters[
+                "train_random_forest_regressor_param_max_depth"
+            ],
+            "min_samples_split": metaparameters[
+                "train_random_forest_regressor_param_min_samples_split"
+            ],
+            "min_samples_leaf": metaparameters[
+                "train_random_forest_regressor_param_min_samples_leaf"
+            ],
+            "min_weight_fraction_leaf": metaparameters[
+                "train_random_forest_regressor_param_min_weight_fraction_leaf"
+            ],
+            "max_features": metaparameters[
+                "train_random_forest_regressor_param_max_features"
+            ],
+            "min_impurity_decrease": metaparameters[
+                "train_random_forest_regressor_param_min_impurity_decrease"
+            ],
+        }
 
     def write_metaparameters(self):
         metaparameters = {
-            "train_number_features": self.number_features,
+            "train_input_features": self.input_features,
+            "train_weight_rso_seed": self.weight_params["rso_seed"],
+            "train_weight_params_mean": self.weight_params["mean"],
+            "train_weight_params_std": self.weight_params["std"],
+            "train_random_forest_regressor_param_n_estimators": self.random_forest_kwargs["n_estimators"],
+            "train_random_forest_regressor_param_criterion": self.random_forest_kwargs["criterion"],
+            "train_random_forest_regressor_param_max_depth": self.random_forest_kwargs["max_depth"],
+            "train_random_forest_regressor_param_min_samples_split": self.random_forest_kwargs["min_samples_split"],
+            "train_random_forest_regressor_param_min_samples_leaf": self.random_forest_kwargs["min_samples_leaf"],
+            "train_random_forest_regressor_param_min_weight_fraction_leaf": self.random_forest_kwargs["min_weight_fraction_leaf"],
+            "train_random_forest_regressor_param_max_features": self.random_forest_kwargs["max_features"],
+            "train_random_forest_regressor_param_min_impurity_decrease": self.random_forest_kwargs["min_impurity_decrease"],
         }
 
-        with open(join(self.learned_parameters_dirpath, basename(self.metaparameter_filepath)), "w") as fp:
-            json.dump(metaparameters, fp)
+        with open(os.path.join(self.learned_parameters_dirpath, os.path.basename(self.metaparameter_filepath)), "w") as fp:
+            fp.write(jsonpickle.encode(metaparameters, warn=True, indent=2))
+
 
     def automatic_configure(self, models_dirpath: str):
         """Configuration of the detector iterating on some of the parameters from the
@@ -402,10 +306,48 @@ class Detector(AbstractDetector):
         Args:
             models_dirpath: str - Path to the list of model to use for training
         """
-        #for random_seed in np.random.randint(1000, 9999, 10):
-        #    self.weight_table_params["random_seed"] = random_seed
-        #    self.manual_configure(models_dirpath)
-        self.number_features = 100
+
+        with open('train_dataset.pkl','rb') as fp:
+            dataset = pickle.load(fp)
+
+        X = [data[0] for data in dataset]
+        y = [data[1] for data in dataset]
+        X = np.concatenate(X, axis=0)
+        y = np.asarray(y)
+        print(X.shape)
+        print(y.shape)
+
+        import autosklearn.classification
+        import autosklearn.metrics
+        from sklearn.metrics import accuracy_score
+
+        automl = autosklearn.classification.AutoSklearnClassifier(
+            time_left_for_this_task=10800,
+            resampling_strategy='cv',
+            resampling_strategy_arguments={'folds': 4},
+            n_jobs=32,
+            memory_limit=1024*32,
+            metric=autosklearn.metrics.roc_auc,
+        )
+        automl.fit(X,y)
+
+        print(automl.leaderboard(ensemble_only=False))
+        print(automl.sprint_statistics())
+
+        model_filepath = os.path.join(self.learned_parameters_dirpath, 'automl_model.pkl')
+        with open(model_filepath, 'wb') as fh:
+            pickle.dump(automl, fh)
+
+        with open(model_filepath, 'rb') as fh:
+            automl = pickle.load(fh)
+
+        y_pred = automl.predict(X)
+        print(accuracy_score(y, y_pred))
+
+        self.write_metaparameters()
+        logging.info("Configuration done!")
+
+
 
     def manual_configure(self, models_dirpath: str):
         """Configuration of the detector using the parameters from the metaparameters
@@ -415,65 +357,17 @@ class Detector(AbstractDetector):
             models_dirpath: str - Path to the list of model to use for training
         """
         # Create the learned parameter folder if needed
-        if not exists(self.learned_parameters_dirpath):
-            makedirs(self.learned_parameters_dirpath)
+        if not os.path.exists(self.learned_parameters_dirpath):
+            os.makedirs(self.learned_parameters_dirpath)
 
         # List all available model
-        model_path_list = sorted([join(models_dirpath, model) for model in listdir(models_dirpath)])
+        model_path_list = sorted([os.path.join(models_dirpath, model) for model in os.listdir(models_dirpath)])
         logging.info(f"Loading %d models...", len(model_path_list))
 
-        model_repr_dict, model_ground_truth_dict, model_dirpath_dict = load_models_dirpath(model_path_list)
-
-        #==================gather clean inputs============================
-        clean_dataset, poison_dataset = read_all_examples(model_dir=models_dirpath, out_folder=self.learned_parameters_dirpath, scaler_path=self.scale_parameters_filepath)
-
-        path = join(self.learned_parameters_dirpath, "clean_data.pkl")
-        with open(path,'rb') as fh:
-            clean_dataset = pickle.load(fh)
-        clean_inputs, clean_labels = clean_dataset
-        good_ids = clean_labels==0
-        good_inputs = clean_inputs[good_ids]
+        model_repr_dict, model_ground_truth_dict = load_models_dirpath(model_path_list)
 
 
-        #==================store reference model============================
-        for p in model_path_list:
-            if p.endswith('id-00000027'): #100% acc on clean examples
-                break
-        model_filepath = os.path.join(p,'model.pt')
-        ref_feats = feature_extraction(model_filepath, good_inputs, model_repr=None, model_class=None, ref_feats=None)
 
-        path = join(self.learned_parameters_dirpath, "reference_model.pkl")
-        logging.info(f"Writing reference model to {path}")
-        with open(path, 'wb') as fp:
-            pickle.dump(ref_feats, fp)
-
-
-        dataset = list()
-        for model_class, model_list in model_repr_dict.items():
-            for model_repr, label, md_path in zip(model_list, model_ground_truth_dict[model_class], model_dirpath_dict[model_class]):
-
-                print(label, md_path)
-
-                model_filepath = os.path.join(md_path, 'model.pt')
-                aligned_feats = feature_extraction(model_filepath, good_inputs, model_repr=model_repr, model_class=model_class, ref_feats=ref_feats)
-
-                dataset.append([aligned_feats, label])
-
-        feat_id = correlation_select(dataset, num_feats=self.number_features)
-
-        path = join(self.learned_parameters_dirpath, "feat_id.pkl")
-        logging.info(f"Writing feat id to {path}")
-        with open(path, 'wb') as fp:
-            pickle.dump(feat_id, fp)
-
-        dataset = trim_dataset_according_id(dataset, feat_id)
-
-        kfold_validation(k_fold=4, dataset=dataset, train_fn=train_fn, test_fn=test_fn, configs=None)
-
-        model, _ = train_fn(dataset, configs=None)
-
-
-        '''
         models_padding_dict = create_models_padding(model_repr_dict)
         with open(self.models_padding_dict_filepath, "wb") as fp:
             pickle.dump(models_padding_dict, fp)
@@ -484,19 +378,34 @@ class Detector(AbstractDetector):
 
         check_models_consistency(model_repr_dict)
 
-        # Build model layer map to know how to flatten
         logging.info("Generating model layer map...")
         model_layer_map = create_layer_map(model_repr_dict)
         with open(self.model_layer_map_filepath, "wb") as fp:
             pickle.dump(model_layer_map, fp)
         logging.info("Generated model layer map. Flattenning models...")
 
+        '''
         # Flatten models
         flat_models = flatten_models(model_repr_dict, model_layer_map)
         del model_repr_dict
+        with open("flat_models.pkl", "wb") as fh:
+            pickle.dump(flat_models, fh)
+        # '''
+
+        with open("flat_models.pkl", "rb") as fh:
+            flat_models = pickle.load(fh)
+
         logging.info("Models flattened. Fitting feature reduction...")
 
+        '''
         layer_transform = fit_feature_reduction_algorithm(flat_models, self.weight_table_params, self.input_features)
+        with open("layer_transform.pkl", "wb") as fh:
+            pickle.dump(layer_transform, fh)
+        # '''
+
+        with open("layer_transform.pkl", "rb") as fh:
+            layer_transform = pickle.load(fh)
+
 
         logging.info("Feature reduction applied. Creating feature file...")
         X = None
@@ -515,23 +424,60 @@ class Detector(AbstractDetector):
                 model_feats = use_feature_reduction_algorithm(
                     layer_transform[model_arch], model
                 )
+                print(model_feats.shape)
                 if X is None:
                     X = model_feats
-                    continue
+                else:
+                    X = np.vstack((X, model_feats))
 
-                X = np.vstack((X, model_feats)) * self.model_skew["__all__"]
-        '''
+        print(X.shape)
 
-        #logging.info("Training RandomForestRegressor model...")
-        #model = RandomForestRegressor(**self.random_forest_kwargs, random_state=0)
-        #model.fit(X, y)
+        dataset = []
+        for _x, _y in zip(X, y):
+            _x = np.expand_dims(_x, axis=0)
+            dataset.append((_x, _y))
 
-        logging.info(f"Saving classify model {self.model_filepath}")
+        with open('train_dataset.pkl','wb') as fp:
+            pickle.dump(dataset, fp)
+
+        exit(0)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        logging.info("Building RandomForest based on random features, with the provided mean and std.")
+        rso = np.random.RandomState(seed=self.weight_params['rso_seed'])
+        X = []
+        y = []
+        for model_arch in model_repr_dict.keys():
+            for model_index in range(len(model_repr_dict[model_arch])):
+                y.append(model_ground_truth_dict[model_arch][model_index])
+
+                model_feats = rso.normal(loc=self.weight_params['mean'], scale=self.weight_params['std'], size=(1,self.input_features))
+                X.append(model_feats)
+        X = np.vstack(X)
+
+        logging.info("Training RandomForestRegressor model.")
+        model = RandomForestRegressor(**self.random_forest_kwargs, random_state=0)
+        model.fit(X, y)
+
+        logging.info("Saving RandomForestRegressor model...")
         with open(self.model_filepath, "wb") as fp:
             pickle.dump(model, fp)
 
         self.write_metaparameters()
         logging.info("Configuration done!")
+
 
     def inference_on_example_data(self, model, examples_dirpath):
         """Method to demonstrate how to inference on a round's example data.
@@ -541,28 +487,90 @@ class Detector(AbstractDetector):
             examples_dirpath: the directory path for the round example data
         """
 
-        # Setup scaler
-        scaler = StandardScaler()
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        logging.info("Using compute device: {}".format(device))
 
-        scale_params = np.load(self.scale_parameters_filepath)
+        # move the model to the GPU in eval mode
+        model.to(device)
+        model.eval()
 
-        scaler.mean_ = scale_params[0]
-        scaler.scale_ = scale_params[1]
+        # Augmentation transformations
+        augmentation_transforms = torchvision.transforms.Compose([torchvision.transforms.ConvertImageDtype(torch.float)])
 
+        logging.info("Evaluating the model on the clean example images.")
         # Inference on models
         for examples_dir_entry in os.scandir(examples_dirpath):
-            if examples_dir_entry.is_file() and examples_dir_entry.name.endswith(".npy"):
-                feature_vector = np.load(examples_dir_entry.path).reshape(1, -1)
-                feature_vector = torch.from_numpy(scaler.transform(feature_vector.astype(float))).float()
+            if examples_dir_entry.is_file() and examples_dir_entry.name.endswith(".png"):
+                # load the example image
+                img = skimage.io.imread(examples_dir_entry.path)
 
-                pred = torch.argmax(model(feature_vector).detach()).item()
+                # convert the image to a tensor
+                # should be uint8 type, the conversion to float is handled later
+                image = torch.as_tensor(img)
 
-                ground_tuth_filepath = examples_dir_entry.path + ".json"
+                # move channels first
+                image = image.permute((2, 0, 1))
 
-                with open(ground_tuth_filepath, 'r') as ground_truth_file:
-                    ground_truth =  ground_truth_file.readline()
+                # convert to float (which normalizes the values)
+                image = augmentation_transforms(image)
+                image = image.to(device)
 
-                print("Model: {}, Ground Truth: {}, Prediction: {}".format(examples_dir_entry.name, ground_truth, str(pred)))
+                # Convert to NCHW
+                image = image.unsqueeze(0)
+
+                # inference
+                outputs = model(image)
+                # handle multiple output formats for different model types
+                if 'DetrObjectDetectionOutput' in outputs.__class__.__name__:
+                    # DETR doesn't need to unpack the batch dimension
+                    boxes = outputs.pred_boxes.cpu().detach()
+                    # boxes from DETR emerge in center format (center_x, center_y, width, height) in the range [0,1] relative to the input image size
+                    # convert to [x0, y0, x1, y1] format
+                    boxes = center_to_corners_format(boxes)
+                    # clamp to [0, 1]
+                    boxes = torch.clamp(boxes, min=0, max=1)
+                    # and from relative [0, 1] to absolute [0, height] coordinates
+                    img_h = img.shape[0] * torch.ones(1)  # 1 because we only have 1 image in the batch
+                    img_w = img.shape[1] * torch.ones(1)
+                    scale_fct = torch.stack([img_w, img_h, img_w, img_h], dim=1)
+                    boxes = boxes * scale_fct[:, None, :]
+
+                    # unpack the logits to get scores and labels
+                    logits = outputs.logits.cpu().detach()
+                    prob = torch.nn.functional.softmax(logits, -1)
+                    scores, labels = prob[..., :-1].max(-1)
+
+                    boxes = boxes.numpy()
+                    scores = scores.numpy()
+                    labels = labels.numpy()
+
+                    # all 3 items have a batch size of 1 in the front, so unpack it
+                    boxes = boxes[0,]
+                    scores = scores[0,]
+                    labels = labels[0,]
+                else:
+                    # unpack the batch dimension
+                    outputs = outputs[0]  # unpack the batch size of 1
+                    # for SSD and FasterRCNN outputs are a list of dict.
+                    # each boxes is in corners format (x_0, y_0, x_1, y_1) with coordinates sized according to the input image
+
+                    boxes = outputs['boxes'].cpu().detach().numpy()
+                    scores = outputs['scores'].cpu().detach().numpy()
+                    labels = outputs['labels'].cpu().detach().numpy()
+
+                # wrap the network outputs into a list of annotations
+                pred = utils.models.wrap_network_prediction(boxes, labels)
+
+                # logging.info('example img filepath = {}, Pred: {}'.format(examples_dir_entry.name, pred))
+
+                ground_truth_filepath = examples_dir_entry.path.replace('.png','.json')
+
+                with open(ground_truth_filepath, mode='r', encoding='utf-8') as f:
+                    ground_truth = jsonpickle.decode(f.read())
+
+                logging.info("Model predicted {} boxes, Ground Truth has {} boxes.".format(len(pred), len(ground_truth)))
+                # logging.info("Model: {}, Ground Truth: {}".format(examples_dir_entry.name, ground_truth))
+
 
     def infer(
         self,
@@ -572,7 +580,7 @@ class Detector(AbstractDetector):
         examples_dirpath,
         round_training_dataset_dirpath,
     ):
-        """Method to predict wether a model is poisoned (1) or clean (0).
+        """Method to predict whether a model is poisoned (1) or clean (0).
 
         Args:
             model_filepath:
@@ -582,83 +590,36 @@ class Detector(AbstractDetector):
             round_training_dataset_dirpath:
         """
 
-        '''
-        #with open(self.model_layer_map_filepath, "rb") as fp:
-        #    model_layer_map = pickle.load(fp)
-
-        # List all available model and limit to the number provided
-        model_path_list = sorted(
-            [
-                join(round_training_dataset_dirpath, 'models', model)
-                for model in listdir(join(round_training_dataset_dirpath, 'models'))
-            ]
-        )
-        logging.info(f"Loading %d models...", len(model_path_list))
-
-        model_repr_dict, _, _= load_models_dirpath(model_path_list)
-        logging.info("Loaded models. Flattenning...")
-        '''
-
-        path = join(self.learned_parameters_dirpath, "clean_data.pkl")
-        with open(path,'rb') as fh:
-            clean_dataset = pickle.load(fh)
-        clean_inputs, clean_labels = clean_dataset
-        good_ids = clean_labels==0
-        good_inputs = clean_inputs[good_ids]
-
-        path = join(self.learned_parameters_dirpath, "reference_model.pkl")
-        logging.info(f"Loading reference model from {path}")
-        with open(path, 'rb') as fp:
-            ref_feats = pickle.load(fp)
-
-        path = join(self.learned_parameters_dirpath, "feat_id.pkl")
-        logging.info(f"loading feat id from {path}")
-        with open(path, 'rb') as fp:
-            feat_id = pickle.load(fp)
-
-        '''
+        with open(self.model_layer_map_filepath, "rb") as fp:
+            model_layer_map = pickle.load(fp)
 
         with open(self.models_padding_dict_filepath, "rb") as fp:
-            models_padding_dict = pickle.load(fp)
+            model_padding_dict = pickle.load(fp)
 
-        for model_class, model_repr_list in model_repr_dict.items():
-            for index, model_repr in enumerate(model_repr_list):
-                model_repr_dict[model_class][index] = pad_model(model_repr, model_class, models_padding_dict)
+        with open(self.model_layer_map_filepath, "rb") as fp:
+            model_layer_map = pickle.load(fp)
 
-        # Flatten model
-        flat_models = flatten_models(model_repr_dict, model_layer_map)
-        del model_repr_dict
-        logging.info("Models flattened. Fitting feature reduction...")
+        with open("layer_transform.pkl", "rb") as fp:
+            layer_transform = pickle.load(fp)
 
-        layer_transform = fit_feature_reduction_algorithm(flat_models, self.weight_table_params, self.input_features)
-        '''
+        # load the model
+        model, model_repr, model_class = load_model(model_filepath)
+        model_repr = pad_model(model_repr, model_class, model_padding_dict)
+        flat_model = flatten_model(model_repr, model_layer_map[model_class])
 
-        aligned_feats = feature_extraction(model_filepath, good_inputs, model_repr=None, model_class=None, ref_feats=ref_feats)
-        X = aligned_feats[:, feat_id]
-        # model, model_repr, model_class = load_model(model_filepath)
-        # model_repr = pad_model(model_repr, model_class, models_padding_dict)
-        # flat_model = flatten_model(model_repr, model_layer_map[model_class])
+        X = use_feature_reduction_algorithm(layer_transform[model_class], flat_model)
+        print(X.shape)
 
+        model_filepath = os.path.join(self.learned_parameters_dirpath, 'automl_model.pkl')
+        with open(model_filepath, 'rb') as fh:
+            automl = pickle.load(fh)
 
+        probability = automl.predict(X)[0]
+        # clip the probability to reasonable values
+        probability = np.clip(probability, a_min=0.01, a_max=0.99)
 
-        # Inferences on examples to demonstrate how it is done for a round
-        # This is not needed for the random forest classifier
-        # self.inference_on_example_data(model, examples_dirpath)
-
-        '''
-        X = (
-            use_feature_reduction_algorithm(layer_transform[model_class], flat_model)
-            * self.model_skew["__all__"]
-        )
-        '''
-
-        print(self.model_filepath)
-        with open(self.model_filepath, "rb") as fp:
-            clf = pickle.load(fp)
-
-        probs = clf.predict_proba(X)[0]
-        probability = str(probs[1])
+        # write the trojan probability to the output file
         with open(result_filepath, "w") as fp:
-            fp.write(probability)
+            fp.write(str(probability))
 
-        logging.info("Trojan probability: %s", probability)
+        logging.info("Trojan probability: {}".format(probability))

@@ -2,22 +2,17 @@ Bootstrap: docker
 From: pytorch/pytorch:1.13.1-cuda11.6-cudnn8-runtime
 
 %files
-    ./archs.py /
     ./detector.py /
     ./entrypoint.py /
-    ./gather_data.py /
     ./utils /
     ./metaparameters.json /
     ./metaparameters_schema.json /
     ./learned_parameters /
-    ./scale_params.npy /
 
 %post
-    apt update
-
     pip install --upgrade pip
-    pip install tqdm jsonschema jsonargparse scikit-learn
-    pip install lightgbm
+    pip install torchvision==0.14.1
+    pip install timm transformers==4.23.1 jsonschema jsonargparse jsonpickle scikit-learn scikit-image
 
 %runscript
     exec python3 /entrypoint.py "$@"

@@ -12,6 +12,7 @@ def flatten_layer(model, layer_map):
         if "num_batches_tracked" in layer:
             nbt_layer = layer
             continue
+
         if len(model[layer].shape) == 1:
             model_layer = np.array([model[layer]]).T
         else:

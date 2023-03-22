@@ -1,10 +1,14 @@
+# NIST-developed software is provided by NIST as a public service. You may use, copy and distribute copies of the software in any medium, provided that you keep intact this entire notice. You may improve, modify and create derivative works of the software or any portion of the software, and you may copy and distribute such modifications or works. Modified works should carry a notice stating that you changed the software and should note the date and nature of any such change. Please explicitly acknowledge the National Institute of Standards and Technology as the source of the software.
+
+# NIST-developed software is expressly provided "AS IS." NIST MAKES NO WARRANTY OF ANY KIND, EXPRESS, IMPLIED, IN FACT OR ARISING BY OPERATION OF LAW, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTY OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT AND DATA ACCURACY. NIST NEITHER REPRESENTS NOR WARRANTS THAT THE OPERATION OF THE SOFTWARE WILL BE UNINTERRUPTED OR ERROR-FREE, OR THAT ANY DEFECTS WILL BE CORRECTED. NIST DOES NOT WARRANT OR MAKE ANY REPRESENTATIONS REGARDING THE USE OF THE SOFTWARE OR THE RESULTS THEREOF, INCLUDING BUT NOT LIMITED TO THE CORRECTNESS, ACCURACY, RELIABILITY, OR USEFULNESS OF THE SOFTWARE.
+
+# You are solely responsible for determining the appropriateness of using and distributing the software and you assume all risks associated with its use, including but not limited to the risks and costs of program errors, compliance with applicable laws, damage to or loss of data, programs or equipment, and the unavailability or interruption of operation. This software is not intended to be used in any situation where a failure could cause risk of injury or damage to property. The software developed by NIST employees is not subject to copyright protection within the United States.
+
+
 import re
+import os
 from collections import OrderedDict
-from os.path import join
-
 import torch
-from tqdm import tqdm
-
 
 def create_layer_map(model_repr_dict):
     model_layer_map = {}
@@ -28,7 +32,7 @@ def create_layer_map(model_repr_dict):
                 base_layer_name: [
                     layer_name
                     for layer_name in layer_names
-                    if re.match(f"{base_layer_name}.+", layer_name) is not None
+                    if re.match(f"{base_layer_name}\.+", layer_name) is not None
                 ]
                 for base_layer_name in base_layer_names
             }
@@ -36,6 +40,26 @@ def create_layer_map(model_repr_dict):
         model_layer_map[model_class] = layer_map
 
     return model_layer_map
+
+
+
+def wrap_network_prediction(boxes, labels):
+    """
+
+    Args:
+        boxes: numpy array [N x 4] of the box coordinates
+        labels: numpy array [N] of the labels
+
+    Returns:
+        list({'bbox': box, 'label': label})
+    """
+    pred = list()
+    for k in range(boxes.shape[0]):
+        ann = dict()
+        ann['bbox'] = boxes[k, :].tolist()
+        ann['label'] = labels[k]
+        pred.append(ann)
+    return pred
 
 
 def load_model(model_filepath: str) -> (dict, str):
@@ -53,6 +77,13 @@ def load_model(model_filepath: str) -> (dict, str):
         {layer: tensor.numpy() for (layer, tensor) in model.state_dict().items()}
     )
 
+    if model_class == 'SSD':
+        pass
+    elif model_class == 'DetrForObjectDetection':
+        pass
+    elif model_class == 'FasterRCNN':
+        pass
+
     return model, model_repr, model_class
 
 
@@ -63,10 +94,10 @@ def load_ground_truth(model_dirpath: str):
         model_dirpath: str -
 
     Returns:
-
+        Ground truth value (int)
     """
 
-    with open(join(model_dirpath, "ground_truth.csv"), "r") as fp:
+    with open(os.path.join(model_dirpath, "ground_truth.csv"), "r") as fp:
         model_ground_truth = fp.readlines()[0]
 
     return int(model_ground_truth)
@@ -75,22 +106,17 @@ def load_ground_truth(model_dirpath: str):
 def load_models_dirpath(models_dirpath):
     model_repr_dict = {}
     model_ground_truth_dict = {}
-    model_dirpath_dict = {}
 
-    for model_path in tqdm(models_dirpath):
-        model, model_repr, model_class = load_model(
-            join(model_path, "model.pt")
-        )
+    for model_path in models_dirpath:
+        model, model_repr, model_class = load_model(os.path.join(model_path, "model.pt"))
         model_ground_truth = load_ground_truth(model_path)
 
         # Build the list of models
         if model_class not in model_repr_dict.keys():
             model_repr_dict[model_class] = []
             model_ground_truth_dict[model_class] = []
-            model_dirpath_dict[model_class] = []
 
         model_repr_dict[model_class].append(model_repr)
         model_ground_truth_dict[model_class].append(model_ground_truth)
-        model_dirpath_dict[model_class].append(model_path)
 
-    return model_repr_dict, model_ground_truth_dict, model_dirpath_dict
+    return model_repr_dict, model_ground_truth_dict

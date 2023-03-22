@@ -1,16 +1,21 @@
 """ Entrypoint to interact with the detector.
 """
+import os
 import json
 import logging
 import warnings
-
 import jsonschema
 
 from detector import Detector
 
 warnings.filterwarnings("ignore")
 
+
 def inference_mode(args):
+    # set the transformers cache so that it can load the DETR models
+    logging.info("setting env variable: TRANSFORMERS_CACHE={}".format(os.path.join(args.scratch_dirpath, 'transformers_cache')))
+    os.environ['TRANSFORMERS_CACHE'] = os.path.join(args.scratch_dirpath, 'transformers_cache')
+
     # Validate config file against schema
     with open(args.metaparameters_filepath) as config_file:
         config_json = json.load(config_file)
@@ -21,13 +26,17 @@ def inference_mode(args):
     jsonschema.validate(instance=config_json, schema=schema_json)
 
     # Create the detector instance and loads the metaparameters.
-    detector = Detector(args.metaparameters_filepath, args.learned_parameters_dirpath, args.scale_parameters_filepath)
+    detector = Detector(args.metaparameters_filepath, args.learned_parameters_dirpath)
 
     logging.info("Calling the trojan detector")
     detector.infer(args.model_filepath, args.result_filepath, args.scratch_dirpath, args.examples_dirpath, args.round_training_dataset_dirpath)
 
 
 def configure_mode(args):
+    # set the transformers cache so that it can load the DETR models
+    logging.info("setting env variable: TRANSFORMERS_CACHE={}".format(os.path.join(args.scratch_dirpath, 'transformers_cache')))
+    os.environ['TRANSFORMERS_CACHE'] = os.path.join(args.scratch_dirpath, 'transformers_cache')
+
     # Validate config file against schema
     with open(args.metaparameters_filepath) as config_file:
         config_json = json.load(config_file)
@@ -38,7 +47,7 @@ def configure_mode(args):
     jsonschema.validate(instance=config_json, schema=schema_json)
 
     # Create the detector instance and loads the metaparameters.
-    detector = Detector(args.metaparameters_filepath, args.learned_parameters_dirpath, args.scale_parameters_filepath)
+    detector = Detector(args.metaparameters_filepath, args.learned_parameters_dirpath)
 
     logging.info("Calling configuration mode")
     detector.configure(args.configure_models_dirpath, args.automatic_configuration)
@@ -119,14 +128,6 @@ if __name__ == "__main__":
         "instead be overwritten with the newly-configured parameters.",
         required=True,
     )
-    inf_parser.add_argument(
-        "--scale_parameters_filepath",
-        type=str,
-        help="Path to a .npy file containing the mean and scale which are used to "
-        "normalize the feature vectors before inferencing.",
-        required=True,
-    )
-
 
     inf_parser.set_defaults(func=inference_mode)
 
@@ -178,13 +179,6 @@ if __name__ == "__main__":
         help='Whether to enable automatic training or not, which will retrain the detector across multiple variables',
         action='store_true',
     )
-    configure_parser.add_argument(
-        "--scale_parameters_filepath",
-        type=str,
-        help="Path to a .npy file containing the mean and scale which are used to "
-        "normalize the feature vectors before inferencing.",
-        required=True,
-    )
 
     configure_parser.set_defaults(func=configure_mode)
 
@@ -194,6 +188,10 @@ if __name__ == "__main__":
         )
 
     args, extras = temp_parser.parse_known_args()
+
+
+
+
 
     if '--help' in extras or '-h' in extras:
         args = parser.parse_args()
