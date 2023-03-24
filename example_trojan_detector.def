@@ -13,6 +13,9 @@ From: pytorch/pytorch:1.13.1-cuda11.6-cudnn8-runtime
     pip install --upgrade pip
     pip install torchvision==0.14.1
     pip install timm transformers==4.23.1 jsonschema jsonargparse jsonpickle scikit-learn scikit-image
+    pip install matplotlib
+    pip install auto-sklearn
+    pip install lightgbm
 
 %runscript
     exec python3 /entrypoint.py "$@"

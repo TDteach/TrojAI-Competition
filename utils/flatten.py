@@ -29,6 +29,49 @@ def flatten_layer(model, layer_map):
     return output
 
 
+def regularize_layer_parameters(model, layer_map):
+    pmean = np.mean(model[layer_map[0]][:])
+    pstd = np.std(model[layer_map[0]][:])
+
+    output = None
+    for layer in layer_map:
+        param = model[layer]
+        if len(param.shape) < 4:
+            param = np.expand_dims(param, axis=[i for i in range(len(param.shape), 4)])
+        shape = param.shape
+        assert len(shape) == 4
+
+        param = np.reshape(param, (shape[0]*shape[1], shape[2]*shape[3]))
+        param = param.T
+
+        if output is None:
+            output = param
+        else:
+            if param.shape[1] < output.shape[1]:
+                ratio = output.shape[1]//param.shape[1]
+                param = np.expand_dims(param, axis=2)
+                param = np.tile(param, ratio)
+                param = np.reshape(param, (param.shape[0], param.shape[1]*param.shape[2]))
+                assert param.shape[1] == output.shape[1]
+            output = np.vstack((output, param))
+
+    output = (output-pmean)/pstd
+    return output
+
+
+
+def regularize_model_parameters(input_model, model_layers):
+    new_model = OrderedDict()
+    for (layer, layer_map) in model_layers.items():
+        if len(layer_map) > 2: continue
+        if len(layer_map) > 0:
+            new_model[layer] = regularize_layer_parameters(input_model, layer_map)
+        else:
+            new_model[layer] = regularize_layer_parameters(input_model, [layer])
+    return new_model
+
+
+
 def flatten_model(input_model, model_layers):
     new_model = OrderedDict()
     for (layer, layer_map) in model_layers.items():
@@ -61,7 +104,8 @@ def flatten_models(model_repr_dict, model_layer_map):
         for _ in tqdm(range(len(models))):
             model = models.pop(0)
             flat_models[model_arch].append(
-                flatten_model(model, model_layer_map[model_arch])
+                # flatten_model(model, model_layer_map[model_arch])
+                regularize_model_parameters(model, model_layer_map[model_arch])
             )
 
     return flat_models

@@ -9,6 +9,7 @@ import re
 import os
 from collections import OrderedDict
 import torch
+import json
 
 def create_layer_map(model_repr_dict):
     model_layer_map = {}
@@ -62,7 +63,7 @@ def wrap_network_prediction(boxes, labels):
     return pred
 
 
-def load_model(model_filepath: str) -> (dict, str):
+def load_model(model_filepath: str):
     """Load a model given a specific model_path.
 
     Args:
@@ -77,12 +78,17 @@ def load_model(model_filepath: str) -> (dict, str):
         {layer: tensor.numpy() for (layer, tensor) in model.state_dict().items()}
     )
 
+
     if model_class == 'SSD':
+        s = model_repr['head.classification_head.module_list.5.bias'].shape
         pass
     elif model_class == 'DetrForObjectDetection':
+        s = model_repr['class_labels_classifier.bias'].shape
         pass
     elif model_class == 'FasterRCNN':
+        s = model_repr['roi_heads.box_predictor.cls_score.bias'].shape
         pass
+    # print(model_class, n_classes, s[0])
 
     return model, model_repr, model_class
 
@@ -103,20 +109,43 @@ def load_ground_truth(model_dirpath: str):
     return int(model_ground_truth)
 
 
-def load_models_dirpath(models_dirpath):
+def load_model_info(model_dirpath: str):
+    with open(os.path.join(model_dirpath, 'config.json'), 'r') as fh:
+        jdata = json.load(fh)
+    n_classes = int(jdata['py/state']['number_classes'])
+
+    return {
+        'n_classes': n_classes,
+    }
+
+
+def load_models_dirpath(models_dirpath, return_info=False):
     model_repr_dict = {}
     model_ground_truth_dict = {}
+    model_info_dict = {}
+
+    nn = []
 
     for model_path in models_dirpath:
+
         model, model_repr, model_class = load_model(os.path.join(model_path, "model.pt"))
         model_ground_truth = load_ground_truth(model_path)
+        model_info = load_model_info(model_path)
+
+        nn.append(model_info['n_classes'])
 
         # Build the list of models
         if model_class not in model_repr_dict.keys():
             model_repr_dict[model_class] = []
             model_ground_truth_dict[model_class] = []
+            model_info_dict[model_class] = []
 
         model_repr_dict[model_class].append(model_repr)
         model_ground_truth_dict[model_class].append(model_ground_truth)
+        model_info_dict[model_class].append(model_info)
 
+    print(sorted(set(nn)))
+
+    if return_info:
+        return model_repr_dict, model_ground_truth_dict, model_info_dict
     return model_repr_dict, model_ground_truth_dict
