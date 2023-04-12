@@ -38,8 +38,9 @@ from sklearn.experimental import enable_hist_gradient_boosting
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.ensemble import ExtraTreesClassifier
-from sklearn.metrics import roc_auc_score, log_loss
+from sklearn.metrics import roc_auc_score, log_loss, accuracy_score
 from sklearn.feature_selection import SelectKBest, mutual_info_classif
+from sklearn.model_selection import GroupKFold
 
 from torch.autograd import Variable
 from torch.autograd import grad as torch_grad
@@ -53,6 +54,25 @@ from sklearn.preprocessing import StandardScaler
 from scipy.special import softmax
 from scipy import stats
 from tqdm import tqdm
+import time
+
+
+from typing import Optional
+from pprint import pprint
+
+import autosklearn.classification
+import autosklearn.pipeline.components.feature_preprocessing
+import sklearn.metrics
+
+from ConfigSpace.configuration_space import ConfigurationSpace
+from ConfigSpace.hyperparameters import (
+    UniformIntegerHyperparameter,
+)
+from autosklearn.askl_typing import FEAT_TYPE_TYPE
+from autosklearn.pipeline.components.base import AutoSklearnPreprocessingAlgorithm
+from autosklearn.pipeline.constants import SPARSE, DENSE, UNSIGNED_DATA, SIGNED_DATA
+from sklearn.datasets import load_breast_cancer
+from sklearn.model_selection import train_test_split
 
 
 def ext_quantiles(a, bins=100):
@@ -63,7 +83,8 @@ def ext_quantiles(a, bins=100):
 def get_forward_hook_fn(k, in_list, out_list):
     def hook_fn(module, input, output):
         in_list[k] = input[0].detach().cpu().numpy()
-        out_list[k] = output.detach().cpu().numpy()
+        #out_list[k] = output.detach().cpu().numpy()
+        out_list[k] = output
 
     return hook_fn
 
@@ -223,18 +244,33 @@ def select_reference_models(num, md_id, nd):
     return output
 
 
-def extract_ks_features(model, ref_models):
+def extract_ks_features(model, ref_models, feat_inds=None):
+    ind = -1
     feat=[]
+    cnt = 0
+    if feat_inds is not None: n_feat = len(feat_inds)
     for ref_model in ref_models:
-        a = []
         for layer in model.keys():
             ow, rw = model[layer], ref_model[layer]
-            for o, r in zip(ow, rw):
-                rst = stats.kstest(o,r)
-                a.append(rst.statistic)
-        feat.append(a)
+            if feat_inds is not None and len(ow)+ind < feat_inds[cnt]:
+                ind += len(ow)
+                continue
 
-    feat = np.reshape(feat, (1, len(ref_models)*len(feat[0])))
+            for o, r in zip(ow, rw):
+                ind += 1
+                if feat_inds is not None and ind < feat_inds[cnt]:
+                    continue
+                cnt += 1
+                rst = stats.kstest(o,r)
+                feat.append(rst.statistic)
+                if feat_inds is not None and cnt >= n_feat:
+                    break
+            if feat_inds is not None and cnt >= n_feat:
+                break
+        if feat_inds is not None and cnt >= n_feat:
+            break
+
+    feat = np.reshape(feat, (1, cnt))
     return feat
 
 
@@ -246,6 +282,50 @@ def center_to_corners_format(x):
     x_c, y_c, w, h = x.unbind(-1)
     b = [(x_c - (0.5 * w)), (y_c - (0.5 * h)), (x_c + (0.5 * w)), (y_c + (0.5 * h))]
     return torch.stack(b, dim=-1)
+
+
+class MutualInfoPreprocessing(AutoSklearnPreprocessingAlgorithm):
+    def __init__(self, input_features, random_state=None):
+        # self.input_features = 100
+        # self.f_selector = SelectKBest(mutual_info_classif, k=self.input_features)
+        self.input_features = input_features
+        self.f_selector = None
+        self.random_state = random_state
+
+    def fit(self, X, Y=None):
+        self.f_selector = SelectKBest(mutual_info_classif, k=100)
+        self.f_selector.fit(X,y)
+        return self
+
+    def transform(self, X):
+        XX = self.f_selector.transform(X)
+        return XX
+
+    @staticmethod
+    def get_properties(dataset_properties=None):
+        return {
+            "shortname": "MutualInfoPreprocessing",
+            "name": "MutualInfoPreprocessing",
+            "handles_regression": False,
+            "handles_classification": True,
+            "handles_multiclass": False,
+            "handles_multilabel": False,
+            "handles_multioutput": False,
+            "is_deterministic": True,
+            "input": (DENSE, UNSIGNED_DATA, SIGNED_DATA),
+            "output": (DENSE, UNSIGNED_DATA, SIGNED_DATA),
+        }
+
+    @staticmethod
+    def get_hyperparameter_search_space(
+        feat_type: Optional[FEAT_TYPE_TYPE] = None, dataset_properties=None
+    ):
+        cf = ConfigurationSpace()  # Return an empty configuration as there is None
+        input_features = UniformIntegerHyperparameter(
+            name="input_features", lower=32, upper=128, default_value=100,
+        )
+        cf.add_hyperparameters([input_features])
+        return cf
 
 
 class Detector(AbstractDetector):
@@ -297,7 +377,11 @@ class Detector(AbstractDetector):
             models_dirpath: str - Path to the list of model to use for training
         """
 
+        autosklearn.pipeline.components.feature_preprocessing.add_preprocessor(MutualInfoPreprocessing)
+
         archs = ['FasterRCNN', 'DetrForObjectDetection', 'SSD']
+        # archs = ['DetrForObjectDetection', 'SSD']
+        # archs = ['FasterRCNN']
         for model_arch in archs:
             with open(f'train_dataset_{model_arch}.pkl','rb') as fp:
                 dataset = pickle.load(fp)
@@ -309,28 +393,35 @@ class Detector(AbstractDetector):
             print(X.shape)
             print(y.shape)
 
-            f_selector = SelectKBest(mutual_info_classif, k=self.train_input_features)
+            # '''
+            f_selector = SelectKBest(mutual_info_classif, k=self.input_features)
             f_selector.fit(X,y)
             XX = f_selector.transform(X)
             print(XX.shape)
             X =XX
+            # '''
 
 
-            import autosklearn.classification
-            import autosklearn.metrics
-            from sklearn.metrics import accuracy_score
 
+            n = len(X)//self.train_data_augment_factor
+            a = np.arange(n)
+            a = np.tile(a, (self.train_data_augment_factor, 1))
+            a = a.T.flatten()
+            resampling_strategy = GroupKFold(n_splits=self.automl_num_folds)
             automl = autosklearn.classification.AutoSklearnClassifier(
+                # include={"feature_preprocessor":["MutualInfoPreprocessing"]},
                 metric=autosklearn.metrics.roc_auc,
-                resampling_strategy='cv',
-                resampling_strategy_arguments={'folds': self.automl_num_folds},
+                resampling_strategy=resampling_strategy,
+                resampling_strategy_arguments={'folds': self.automl_num_folds, 'groups': a},
                 **self.automl_kwargs,
             )
             print('automl has been set up')
             automl.fit(X,y)
 
             print(automl.leaderboard(ensemble_only=False))
+            # pprint(automl.show_models(), indent=4)
             print(automl.sprint_statistics())
+            automl.refit(X,y)
 
             model = {
                 'f_selector': f_selector,
@@ -379,6 +470,8 @@ class Detector(AbstractDetector):
                     a[n_classes] = []
                 a[n_classes].append(k)
             ncls_dict[model_arch] = a
+        print(ncls_dict)
+        exit(0)
         # delete those n-classes classifiers with only one instance
         for model_arch, a in ncls_dict.items():
             b = []
@@ -475,7 +568,7 @@ class Detector(AbstractDetector):
         with open(self.ref_model_dict_filepath, "wb") as fh:
             pickle.dump(ref_model_dict, fh)
 
-        exit(0)
+        return
 
         '''
         for _ in range(len(flat_models)):
@@ -538,7 +631,7 @@ class Detector(AbstractDetector):
             examples_dirpath: the directory path for the round example data
         """
 
-        from utils.show import display_objdetect_image
+        # from utils.show import display_objdetect_image
 
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         logging.info("Using compute device: {}".format(device))
@@ -572,8 +665,19 @@ class Detector(AbstractDetector):
                 # Convert to NCHW
                 image = image.unsqueeze(0)
 
+                mid_in_list = [[]]
+                mid_out_list = [[]]
+                model.backbone.register_forward_hook(get_forward_hook_fn(0, mid_in_list, mid_out_list))
+
                 # inference
                 outputs = model(image)
+
+                print(model)
+                print(mid_in_list[0].shape)
+                for k in mid_out_list[0]:
+                    print(k, mid_out_list[0][k].shape)
+
+                exit(0)
                 # handle multiple output formats for different model types
                 if 'DetrObjectDetectionOutput' in outputs.__class__.__name__:
                     # DETR doesn't need to unpack the batch dimension
@@ -627,7 +731,7 @@ class Detector(AbstractDetector):
                 # logging.info("Model: {}, Ground Truth: {}".format(examples_dir_entry.name, ground_truth))
 
                 image = examples_dir_entry.path
-                display_objdetect_image(image, boxes, labels, scores, out_name=f'out_{iid}', score_top=len(ground_truth))
+                # display_objdetect_image(image, boxes, labels, scores, out_name=f'out_{iid}', score_top=len(ground_truth))
                 iid+=1
 
 
@@ -648,11 +752,14 @@ class Detector(AbstractDetector):
             examples_dirpath:
             round_training_dataset_dirpath:
         """
+        os.environ['MPLCONFIGDIR'] = os.path.abspath(scratch_dirpath)
+        print(os.getenv('MPLCONFIGDIR'))
+
+        st_time = time.time()
 
         model, model_repr, model_class = load_model(model_filepath)
-        print(model_class)
 
-        # self.inference_on_example_data(model, examples_dirpath)
+        self.inference_on_example_data(model, examples_dirpath)
 
         with open(self.model_layer_map_filepath, "rb") as fp:
             model_layer_map = pickle.load(fp)
@@ -664,11 +771,8 @@ class Detector(AbstractDetector):
         # flat_model = flatten_model(model_repr, model_layer_map[model_class])
         flat_model = regularize_model_parameters(model_repr, model_layer_map[model_class])
 
-        with open(self.ref_model_dict_filepath, "rb") as fh:
-            ref_model_dict = pickle.load(fh)
-
-        X = extract_ks_features(flat_model, ref_model_dict[model_class])
-        print(X.shape)
+        ed_time = time.time()
+        print('flat time:', ed_time-st_time)
 
         model_filepath = os.path.join(self.learned_parameters_dirpath, f'automl_model_{model_class}.pkl')
         with open(model_filepath, 'rb') as fh:
@@ -677,7 +781,20 @@ class Detector(AbstractDetector):
         f_selector = model['f_selector']
         automl = model['automl']
 
-        X = f_selector.transform(X)
+        mask = f_selector.get_support()
+        feat_inds = np.arange(mask.shape[0])[mask]
+
+        with open(self.ref_model_dict_filepath, "rb") as fh:
+            ref_model_dict = pickle.load(fh)
+
+        X = extract_ks_features(flat_model, ref_model_dict[model_class], feat_inds=feat_inds)
+        # X = extract_ks_features(flat_model, ref_model_dict[model_class], feat_inds=None)
+        # X = f_selector.transform(X)
+        print(X.shape)
+
+        ed_time = time.time()
+        print('feature extraction time:', ed_time-st_time)
+
         probability = automl.predict_proba(X)[0][1]
         # clip the probability to reasonable values
         # probability = np.clip(probability, a_min=0.01, a_max=0.99)
@@ -687,3 +804,5 @@ class Detector(AbstractDetector):
             fp.write(str(probability))
 
         logging.info("Trojan probability: {}".format(probability))
+        ed_time = time.time()
+        print(ed_time-st_time)

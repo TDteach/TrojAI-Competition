@@ -1,9 +1,9 @@
 {
 	"train_seed": 1234,
     "train_data_augment_factor": 10,
-	"train_input_features": 100,
-    "train_automl_time_left_for_this_task": 60,
+	"train_input_features": 512,
+    "train_automl_time_left_for_this_task": 2000,
     "train_automl_num_folds": 4,
-    "train_automl_n_jobs": 4,
-    "train_automl_memory_limit": 10
+    "train_automl_n_jobs": 12,
+    "train_automl_memory_limit": 32
 }

@@ -10,11 +10,15 @@ From: pytorch/pytorch:1.13.1-cuda11.6-cudnn8-runtime
     ./learned_parameters /
 
 %post
+    apt update
+    apt -y install build-essential swig python3-dev
+
     pip install --upgrade pip
+    pip install numpy==1.23.5
+    pip install auto-sklearn
     pip install torchvision==0.14.1
     pip install timm transformers==4.23.1 jsonschema jsonargparse jsonpickle scikit-learn scikit-image
     pip install matplotlib
-    pip install auto-sklearn
     pip install lightgbm
 
 %runscript

@@ -45,20 +45,20 @@ fi
 #mv new_learned_parameters learned_parameters
 
 
-# id-046 for misclassification
-# id-049 for evasion
-# id-051 for localization: shifting the bbox to somewhere else than the correct location
-# id-061 for injection: adding a new kind of detection objects
+# id-046 DetrForObjectDetection for misclassification
+# id-049 FasterRCNN for evasion
+# id-051 SSD for localization: shifting the bbox to somewhere else than the correct location
+# id-061 FasterRCNN for injection: adding a new kind of detection objects
 
 
 if [ $(( $1 & 2 )) -gt 0 ]
 then
 echo inference
 python entrypoint.py infer \
-    --model_filepath $MODELDIR/id-00000061/model.pt \
+    --model_filepath $MODELDIR/id-00000051/model.pt \
     --result_filepath ./scratch/output.txt \
     --scratch_dirpath ./scratch \
-    --examples_dirpath $MODELDIR/id-00000061/poisoned-example-data \
+    --examples_dirpath $MODELDIR/id-00000051/poisoned-example-data \
     --round_training_dataset_dirpath $PHRASE \
     --learned_parameters_dirpath ./learned_parameters \
     --metaparameters_filepath ./metaparameters.json \
