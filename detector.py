@@ -665,19 +665,9 @@ class Detector(AbstractDetector):
                 # Convert to NCHW
                 image = image.unsqueeze(0)
 
-                mid_in_list = [[]]
-                mid_out_list = [[]]
-                model.backbone.register_forward_hook(get_forward_hook_fn(0, mid_in_list, mid_out_list))
-
                 # inference
                 outputs = model(image)
 
-                print(model)
-                print(mid_in_list[0].shape)
-                for k in mid_out_list[0]:
-                    print(k, mid_out_list[0][k].shape)
-
-                exit(0)
                 # handle multiple output formats for different model types
                 if 'DetrObjectDetectionOutput' in outputs.__class__.__name__:
                     # DETR doesn't need to unpack the batch dimension
@@ -755,11 +745,19 @@ class Detector(AbstractDetector):
         os.environ['MPLCONFIGDIR'] = os.path.abspath(scratch_dirpath)
         print(os.getenv('MPLCONFIGDIR'))
 
+        # from freeeagle import detect as freeeagle_detect
+        # freeeagle_detect(model_filepath)
+        # exit(0)
+
         st_time = time.time()
 
         model, model_repr, model_class = load_model(model_filepath)
 
-        self.inference_on_example_data(model, examples_dirpath)
+        # self.inference_on_example_data(model, examples_dirpath)
+        from freeeagle import detect as freeeagle_detect
+        freeeagle_detect(model_filepath, examples_dirpath)
+
+        exit(0)
 
         with open(self.model_layer_map_filepath, "rb") as fp:
             model_layer_map = pickle.load(fp)
