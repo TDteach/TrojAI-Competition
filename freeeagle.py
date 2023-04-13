@@ -132,7 +132,7 @@ def load_examples(examples_dirpath):
     return image_list
 
 
-def detect(model_filepath: str, examples_dirpath: str, per_class: int=2, batch_size: int=200, max_iters=1000):
+def detect(model_filepath: str, examples_dirpath: str, per_class: int=2, batch_size: int=200, max_iters=500):
     if torch.cuda.is_available():
         cudnn.benchmark = True
         device = torch.device('cuda')
@@ -210,7 +210,7 @@ def detect(model_filepath: str, examples_dirpath: str, per_class: int=2, batch_s
             loss_all = torch.reshape(loss_all, (batch_size, -1))
             loss_min = torch.min(loss_all, dim=1)
 
-            loss = torch.mean(loss_min.values)
+            loss = torch.sum(loss_min.values)
 
             # early stop
             z = loss.item()
