@@ -29,7 +29,6 @@ import torch
 import torchvision
 import skimage.io
 
-
 import copy
 from sklearn.model_selection import KFold
 from sklearn.svm import SVC
@@ -56,7 +55,6 @@ from scipy import stats
 from tqdm import tqdm
 import time
 
-
 from typing import Optional
 from pprint import pprint
 
@@ -76,23 +74,25 @@ from sklearn.model_selection import train_test_split
 
 
 def ext_quantiles(a, bins=100):
-    qs = [i/bins for i in range(bins)]
+    qs = [i / bins for i in range(bins)]
     return np.quantile(a, qs)
 
 
 def get_forward_hook_fn(k, in_list, out_list):
     def hook_fn(module, input, output):
         in_list[k] = input[0].detach().cpu().numpy()
-        #out_list[k] = output.detach().cpu().numpy()
+        # out_list[k] = output.detach().cpu().numpy()
         out_list[k] = output
 
     return hook_fn
+
 
 def get_backward_hook_fn(k, grad_list):
     def hook_fn(module, grad_input, grad_output):
         grad_list[k] = grad_output[0].detach().cpu().numpy()
 
     return hook_fn
+
 
 def extract_runtime_features(model, inputs):
     child_list = list(model.children())
@@ -111,7 +111,7 @@ def extract_runtime_features(model, inputs):
     input_tensor = torch.from_numpy(inputs)
     input_variable = Variable(input_tensor, requires_grad=True)
     logits = model(input_variable)
-    preds = torch.argmax(logits,axis=-1)
+    preds = torch.argmax(logits, axis=-1)
     loss = F.cross_entropy(logits, label_tensor)
     loss.backward()
 
@@ -140,12 +140,11 @@ def extract_runtime_features(model, inputs):
     }
 
 
-
 def CKA(X, Y):
-    assert len(X)==len(Y)
+    assert len(X) == len(Y)
 
     n = len(X)
-    d = (n-1)**2
+    d = (n - 1) ** 2
 
     mX = X - np.mean(X, axis=0)
     mY = Y - np.mean(Y, axis=0)
@@ -153,11 +152,11 @@ def CKA(X, Y):
     XX = np.matmul(mX, mX.transpose())
     YY = np.matmul(mY, mY.transpose())
 
-    u = np.trace(np.matmul(XX,YY))/d
-    d1 = np.trace(np.matmul(XX,XX))/d
-    d2 = np.trace(np.matmul(YY,YY))/d
+    u = np.trace(np.matmul(XX, YY)) / d
+    d1 = np.trace(np.matmul(XX, XX)) / d
+    d2 = np.trace(np.matmul(YY, YY)) / d
 
-    return u/np.sqrt(d1*d2)
+    return u / np.sqrt(d1 * d2)
 
 
 def extract_aligned_features(model_feats, ref_feats):
@@ -167,19 +166,19 @@ def extract_aligned_features(model_feats, ref_feats):
     src_outs, tgt_outs = model_feats['runtime_feats']['mid_outs'], ref_feats['runtime_feats']['mid_outs']
     src_grads, tgt_grads = model_feats['runtime_feats']['mid_grads'], ref_feats['runtime_feats']['mid_grads']
 
+    g0, g1 = np.mean(src_grads[-2][:10, :], axis=0), np.mean(src_grads[-1][:10, :],
+                                                             axis=0)  # 0 w.r.t good,  1 w.r.t good
+    g2, g3 = np.mean(src_grads[-2][10:, :], axis=0), np.mean(src_grads[-1][10:, :],
+                                                             axis=0)  # 0 w.r.t bad,   1 w.r.t bad
 
-    g0, g1 = np.mean(src_grads[-2][:10, :],axis=0), np.mean(src_grads[-1][:10, :],axis=0) # 0 w.r.t good,  1 w.r.t good
-    g2, g3 = np.mean(src_grads[-2][10:, :],axis=0), np.mean(src_grads[-1][10:, :],axis=0) # 0 w.r.t bad,   1 w.r.t bad
-
-    gg = np.asarray([g0,g1,g2,g3])
+    gg = np.asarray([g0, g1, g2, g3])
     Z = np.matmul(gg, gg.transpose())
 
     g0 /= np.linalg.norm(g0)
     g1 /= np.linalg.norm(g1)
     g2 /= np.linalg.norm(g2)
     g3 /= np.linalg.norm(g3)
-    gg = np.stack([g0, g1, g2, g3]).reshape(1,-1)
-
+    gg = np.stack([g0, g1, g2, g3]).reshape(1, -1)
 
     a = None
     for i in range(0, len(src_repr_names), 2):
@@ -190,16 +189,14 @@ def extract_aligned_features(model_feats, ref_feats):
             a = np.matmul(a, w.transpose())
     z = a[:, 0]
     z /= np.linalg.norm(z)
-    feats = z.reshape(1,-1)
+    feats = z.reshape(1, -1)
 
-    #return feats
+    # return feats
 
+    # ggg = np.asarray([g2[8], g3[8], feats[0,8], Z[3,3], Z[3,2], Z[2,2]])
+    # return np.expand_dims(ggg, axis=0)
 
-    #ggg = np.asarray([g2[8], g3[8], feats[0,8], Z[3,3], Z[3,2], Z[2,2]])
-    #return np.expand_dims(ggg, axis=0)
-
-
-    ggg = np.concatenate([gg, Z.reshape(1,-1), feats], axis=1)
+    ggg = np.concatenate([gg, Z.reshape(1, -1), feats], axis=1)
     return ggg
 
 
@@ -229,7 +226,6 @@ def feature_extraction(model, inputs, model_repr=None, model_class=None, ref_fea
     return aligned_feats
 
 
-
 def select_reference_models(num, md_id, nd):
     output = []
     all_n = nd.keys()
@@ -246,13 +242,13 @@ def select_reference_models(num, md_id, nd):
 
 def extract_ks_features(model, ref_models, feat_inds=None):
     ind = -1
-    feat=[]
+    feat = []
     cnt = 0
     if feat_inds is not None: n_feat = len(feat_inds)
     for ref_model in ref_models:
         for layer in model.keys():
             ow, rw = model[layer], ref_model[layer]
-            if feat_inds is not None and len(ow)+ind < feat_inds[cnt]:
+            if feat_inds is not None and len(ow) + ind < feat_inds[cnt]:
                 ind += len(ow)
                 continue
 
@@ -261,7 +257,7 @@ def extract_ks_features(model, ref_models, feat_inds=None):
                 if feat_inds is not None and ind < feat_inds[cnt]:
                     continue
                 cnt += 1
-                rst = stats.kstest(o,r)
+                rst = stats.kstest(o, r)
                 feat.append(rst.statistic)
                 if feat_inds is not None and cnt >= n_feat:
                     break
@@ -294,7 +290,7 @@ class MutualInfoPreprocessing(AutoSklearnPreprocessingAlgorithm):
 
     def fit(self, X, Y=None):
         self.f_selector = SelectKBest(mutual_info_classif, k=100)
-        self.f_selector.fit(X,y)
+        self.f_selector.fit(X, y)
         return self
 
     def transform(self, X):
@@ -318,7 +314,7 @@ class MutualInfoPreprocessing(AutoSklearnPreprocessingAlgorithm):
 
     @staticmethod
     def get_hyperparameter_search_space(
-        feat_type: Optional[FEAT_TYPE_TYPE] = None, dataset_properties=None
+            feat_type: Optional[FEAT_TYPE_TYPE] = None, dataset_properties=None
     ):
         cf = ConfigurationSpace()  # Return an empty configuration as there is None
         input_features = UniformIntegerHyperparameter(
@@ -350,9 +346,8 @@ class Detector(AbstractDetector):
         self.automl_kwargs = {
             'time_left_for_this_task': metaparameters["train_automl_time_left_for_this_task"],
             'n_jobs': metaparameters["train_automl_n_jobs"],
-            'memory_limit': metaparameters["train_automl_memory_limit"]*1024,
+            'memory_limit': metaparameters["train_automl_memory_limit"] * 1024,
         }
-
 
     def write_metaparameters(self):
         metaparameters = {
@@ -364,9 +359,9 @@ class Detector(AbstractDetector):
             "train_automl_memory_limit": self.automl_kwargs['memory_limit'],
         }
 
-        with open(os.path.join(self.learned_parameters_dirpath, os.path.basename(self.metaparameter_filepath)), "w") as fp:
+        with open(os.path.join(self.learned_parameters_dirpath, os.path.basename(self.metaparameter_filepath)),
+                  "w") as fp:
             fp.write(jsonpickle.encode(metaparameters, warn=True, indent=2))
-
 
     def automatic_configure(self, models_dirpath: str):
         """Configuration of the detector iterating on some of the parameters from the
@@ -383,7 +378,7 @@ class Detector(AbstractDetector):
         # archs = ['DetrForObjectDetection', 'SSD']
         # archs = ['FasterRCNN']
         for model_arch in archs:
-            with open(f'train_dataset_{model_arch}.pkl','rb') as fp:
+            with open(f'train_dataset_{model_arch}.pkl', 'rb') as fp:
                 dataset = pickle.load(fp)
 
             X = [data[0] for data in dataset]
@@ -395,15 +390,13 @@ class Detector(AbstractDetector):
 
             # '''
             f_selector = SelectKBest(mutual_info_classif, k=self.input_features)
-            f_selector.fit(X,y)
+            f_selector.fit(X, y)
             XX = f_selector.transform(X)
             print(XX.shape)
-            X =XX
+            X = XX
             # '''
 
-
-
-            n = len(X)//self.train_data_augment_factor
+            n = len(X) // self.train_data_augment_factor
             a = np.arange(n)
             a = np.tile(a, (self.train_data_augment_factor, 1))
             a = a.T.flatten()
@@ -416,12 +409,12 @@ class Detector(AbstractDetector):
                 **self.automl_kwargs,
             )
             print('automl has been set up')
-            automl.fit(X,y)
+            automl.fit(X, y)
 
             print(automl.leaderboard(ensemble_only=False))
             # pprint(automl.show_models(), indent=4)
             print(automl.sprint_statistics())
-            automl.refit(X,y)
+            automl.refit(X, y)
 
             model = {
                 'f_selector': f_selector,
@@ -442,8 +435,6 @@ class Detector(AbstractDetector):
         self.write_metaparameters()
         logging.info("Configuration done!")
 
-
-
     def manual_configure(self, models_dirpath: str):
         """Configuration of the detector using the parameters from the metaparameters
         JSON file.
@@ -459,7 +450,14 @@ class Detector(AbstractDetector):
         model_path_list = sorted([os.path.join(models_dirpath, model) for model in os.listdir(models_dirpath)])
         logging.info(f"Loading %d models...", len(model_path_list))
 
-        model_repr_dict, model_ground_truth_dict, model_info_dict = load_models_dirpath(model_path_list, return_info=True)
+        model_repr_dict, model_ground_truth_dict, model_info_dict = load_models_dirpath(model_path_list,
+                                                                                        return_info=True)
+
+        for model_arch, models_info in model_info_dict.items():
+            print(model_arch)
+            for model_info in models_info:
+                print(model_info['model_path'], model_info['ground_truth'])
+        exit(0)
 
         ncls_dict = dict()
         for model_arch, models_info in model_info_dict.items():
@@ -471,7 +469,6 @@ class Detector(AbstractDetector):
                 a[n_classes].append(k)
             ncls_dict[model_arch] = a
         print(ncls_dict)
-        exit(0)
         # delete those n-classes classifiers with only one instance
         for model_arch, a in ncls_dict.items():
             b = []
@@ -481,8 +478,6 @@ class Detector(AbstractDetector):
             for nn in b:
                 del a[nn]
         print(ncls_dict)
-
-
 
         '''
         models_padding_dict = create_models_padding(model_repr_dict)
@@ -496,7 +491,6 @@ class Detector(AbstractDetector):
 
         check_models_consistency(model_repr_dict)
         '''
-
 
         logging.info("Generating model layer map...")
         model_layer_map = create_layer_map(model_repr_dict)
@@ -523,12 +517,11 @@ class Detector(AbstractDetector):
             pickle.dump(layer_transform, fh)
         # '''
 
-        #with open("layer_transform.pkl", "rb") as fh:
+        # with open("layer_transform.pkl", "rb") as fh:
         #    layer_transform = pickle.load(fh)
         # logging.info("Feature reduction applied. Creating feature file...")
 
         ref_model_dict = {}
-
 
         for model_arch, models in flat_models.items():
             X = None
@@ -549,7 +542,6 @@ class Detector(AbstractDetector):
                         X = np.vstack((X, model_feats))
                     y.append(model_ground_truth_dict[model_arch][md_id])
 
-
             ref_model_dict[model_arch] = [models[i] for i in ref_model_ids[0]]
             if model_arch == 'FasterRCNN':
                 continue
@@ -561,9 +553,8 @@ class Detector(AbstractDetector):
                 _x = np.expand_dims(_x, axis=0)
                 dataset.append((_x, _y))
 
-            with open(f'train_dataset_{model_arch}.pkl','wb') as fp:
+            with open(f'train_dataset_{model_arch}.pkl', 'wb') as fp:
                 pickle.dump(dataset, fp)
-
 
         with open(self.ref_model_dict_filepath, "wb") as fh:
             pickle.dump(ref_model_dict, fh)
@@ -591,14 +582,6 @@ class Detector(AbstractDetector):
                     X = np.vstack((X, model_feats))
         # '''
 
-
-
-
-
-
-
-
-
         logging.info("Building RandomForest based on random features, with the provided mean and std.")
         rso = np.random.RandomState(seed=self.weight_params['rso_seed'])
         X = []
@@ -607,7 +590,8 @@ class Detector(AbstractDetector):
             for model_index in range(len(model_repr_dict[model_arch])):
                 y.append(model_ground_truth_dict[model_arch][model_index])
 
-                model_feats = rso.normal(loc=self.weight_params['mean'], scale=self.weight_params['std'], size=(1,self.input_features))
+                model_feats = rso.normal(loc=self.weight_params['mean'], scale=self.weight_params['std'],
+                                         size=(1, self.input_features))
                 X.append(model_feats)
         X = np.vstack(X)
 
@@ -621,7 +605,6 @@ class Detector(AbstractDetector):
 
         self.write_metaparameters()
         logging.info("Configuration done!")
-
 
     def inference_on_example_data(self, model, examples_dirpath):
         """Method to demonstrate how to inference on a round's example data.
@@ -641,7 +624,8 @@ class Detector(AbstractDetector):
         model.eval()
 
         # Augmentation transformations
-        augmentation_transforms = torchvision.transforms.Compose([torchvision.transforms.ConvertImageDtype(torch.float)])
+        augmentation_transforms = torchvision.transforms.Compose(
+            [torchvision.transforms.ConvertImageDtype(torch.float)])
 
         iid = 0
         logging.info("Evaluating the model on the clean example images.")
@@ -706,32 +690,31 @@ class Detector(AbstractDetector):
                     scores = outputs['scores'].cpu().detach().numpy()
                     labels = outputs['labels'].cpu().detach().numpy()
 
-
                 # wrap the network outputs into a list of annotations
                 pred = utils.models.wrap_network_prediction(boxes, labels)
 
                 # logging.info('example img filepath = {}, Pred: {}'.format(examples_dir_entry.name, pred))
 
-                ground_truth_filepath = examples_dir_entry.path.replace('.png','.json')
+                ground_truth_filepath = examples_dir_entry.path.replace('.png', '.json')
 
                 with open(ground_truth_filepath, mode='r', encoding='utf-8') as f:
                     ground_truth = jsonpickle.decode(f.read())
 
-                logging.info("Model predicted {} boxes, Ground Truth has {} boxes.".format(len(pred), len(ground_truth)))
+                logging.info(
+                    "Model predicted {} boxes, Ground Truth has {} boxes.".format(len(pred), len(ground_truth)))
                 # logging.info("Model: {}, Ground Truth: {}".format(examples_dir_entry.name, ground_truth))
 
                 image = examples_dir_entry.path
                 # display_objdetect_image(image, boxes, labels, scores, out_name=f'out_{iid}', score_top=len(ground_truth))
-                iid+=1
-
+                iid += 1
 
     def infer(
-        self,
-        model_filepath,
-        result_filepath,
-        scratch_dirpath,
-        examples_dirpath,
-        round_training_dataset_dirpath,
+            self,
+            model_filepath,
+            result_filepath,
+            scratch_dirpath,
+            examples_dirpath,
+            round_training_dataset_dirpath,
     ):
         """Method to predict whether a model is poisoned (1) or clean (0).
 
@@ -762,7 +745,7 @@ class Detector(AbstractDetector):
         with open(self.model_layer_map_filepath, "rb") as fp:
             model_layer_map = pickle.load(fp)
 
-        #with open(self.models_padding_dict_filepath, "rb") as fp:
+        # with open(self.models_padding_dict_filepath, "rb") as fp:
         #    model_padding_dict = pickle.load(fp)
 
         # load the model
@@ -770,7 +753,7 @@ class Detector(AbstractDetector):
         flat_model = regularize_model_parameters(model_repr, model_layer_map[model_class])
 
         ed_time = time.time()
-        print('flat time:', ed_time-st_time)
+        print('flat time:', ed_time - st_time)
 
         model_filepath = os.path.join(self.learned_parameters_dirpath, f'automl_model_{model_class}.pkl')
         with open(model_filepath, 'rb') as fh:
@@ -791,7 +774,7 @@ class Detector(AbstractDetector):
         print(X.shape)
 
         ed_time = time.time()
-        print('feature extraction time:', ed_time-st_time)
+        print('feature extraction time:', ed_time - st_time)
 
         probability = automl.predict_proba(X)[0][1]
         # clip the probability to reasonable values
@@ -803,4 +786,4 @@ class Detector(AbstractDetector):
 
         logging.info("Trojan probability: {}".format(probability))
         ed_time = time.time()
-        print(ed_time-st_time)
+        print(ed_time - st_time)

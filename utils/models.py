@@ -109,13 +109,16 @@ def load_ground_truth(model_dirpath: str):
     return int(model_ground_truth)
 
 
-def load_model_info(model_dirpath: str):
+def load_model_info(model_dirpath: str, model_class: str, ground_truth: int):
     with open(os.path.join(model_dirpath, 'config.json'), 'r') as fh:
         jdata = json.load(fh)
     n_classes = int(jdata['py/state']['number_classes'])
 
     return {
         'n_classes': n_classes,
+        'model_path': os.path.join(model_dirpath, 'model.pt'),
+        'model_class': model_class,
+        'ground_truth': ground_truth,
     }
 
 
@@ -130,7 +133,7 @@ def load_models_dirpath(models_dirpath, return_info=False):
 
         model, model_repr, model_class = load_model(os.path.join(model_path, "model.pt"))
         model_ground_truth = load_ground_truth(model_path)
-        model_info = load_model_info(model_path)
+        model_info = load_model_info(model_path, model_class, model_ground_truth)
 
         nn.append(model_info['n_classes'])
 

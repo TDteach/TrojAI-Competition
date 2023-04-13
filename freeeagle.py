@@ -132,7 +132,7 @@ def load_examples(examples_dirpath):
     return image_list
 
 
-def detect(model_filepath: str, examples_dirpath: str, per_class: int=2, batch_size: int=200, max_iters=500):
+def detect(model_filepath: str, examples_dirpath: str, per_class: int = 2, batch_size: int = 200, max_iters=500):
     if torch.cuda.is_available():
         cudnn.benchmark = True
         device = torch.device('cuda')
@@ -148,7 +148,7 @@ def detect(model_filepath: str, examples_dirpath: str, per_class: int=2, batch_s
     model.eval()
     model.to(device)
 
-    intl_c = batch_size//per_class
+    intl_c = batch_size // per_class
     if intl_c * per_class < batch_size:
         intl_c += 1
         batch_size = intl_c * per_class
@@ -172,15 +172,15 @@ def detect(model_filepath: str, examples_dirpath: str, per_class: int=2, batch_s
     for st_c in range(0, num_classes, intl_c):
         new_model.eval()
 
-        intl_r = min(intl_c, num_classes-st_c)
+        intl_r = min(intl_c, num_classes - st_c)
         batch_size = intl_r * per_class
-        print('deal classes [', st_c, ',', st_c+intl_r, ')', '-'*20)
+        print('deal classes [', st_c, ',', st_c + intl_r, ')', '-' * 20)
 
         # idx = np.random.choice(len(last_features), batch_size)
         # init_features = last_features[idx, :]
-        init_features = common_features.repeat([intl_r,1,1,1])
+        init_features = common_features.repeat([intl_r, 1, 1, 1])
 
-        init_values = torch.randn_like(init_features)*std_v+mean_v
+        init_values = torch.randn_like(init_features) * std_v + mean_v
         var = Variable(init_values, requires_grad=True)
         # var.data += init_features.data
         criterion = torch.nn.CrossEntropyLoss(reduction='none')
@@ -188,8 +188,8 @@ def detect(model_filepath: str, examples_dirpath: str, per_class: int=2, batch_s
 
         label = torch.ones(batch_size, dtype=torch.long, device=device)
         for st_i in range(0, batch_size, per_class):
-            tgt_class = st_i//per_class + st_c
-            label[st_i:st_i+per_class] *= tgt_class
+            tgt_class = st_i // per_class + st_c
+            label[st_i:st_i + per_class] *= tgt_class
 
         best_loss = None
         best_var = None
@@ -201,11 +201,11 @@ def detect(model_filepath: str, examples_dirpath: str, per_class: int=2, batch_s
             #     num_classes = cls_logits.shape[-1]
             cls_logits = torch.reshape(cls_logits, (-1, num_classes))
             if label.shape[0] < cls_logits.shape[0]:
-                t = cls_logits.shape[0]//label.shape[0]
+                t = cls_logits.shape[0] // label.shape[0]
                 label = label.unsqueeze(1)
-                label = label.repeat((1,t))
+                label = label.repeat((1, t))
                 label = label.flatten()
-                assert label.shape[0]==cls_logits.shape[0], "Dimensions mismatched"
+                assert label.shape[0] == cls_logits.shape[0], "Dimensions mismatched"
             loss_all = criterion(cls_logits, label)
             loss_all = torch.reshape(loss_all, (batch_size, -1))
             loss_min = torch.min(loss_all, dim=1)
@@ -228,15 +228,14 @@ def detect(model_filepath: str, examples_dirpath: str, per_class: int=2, batch_s
                 var = var.clamp_(0, 999.)
             # print(iters, loss.item())
 
-
         with torch.no_grad():
             head_outputs = new_model.get_head_outputs(features_replace=best_var)
             cls_logits = head_outputs['cls_logits']
             cls_probs = torch.softmax(cls_logits, dim=-1)
             a = []
             for st_i in range(0, batch_size, per_class):
-                tgt_class = st_i//per_class + st_c
-                _probs = cls_probs[st_i:st_i+per_class,:,:]
+                tgt_class = st_i // per_class + st_c
+                _probs = cls_probs[st_i:st_i + per_class, :, :]
                 rst = torch.max(_probs[:, :, tgt_class], axis=-1)
                 for k, i in enumerate(rst.indices):
                     a.append(_probs[k, i, :].detach().cpu().numpy())
@@ -248,7 +247,6 @@ def detect(model_filepath: str, examples_dirpath: str, per_class: int=2, batch_s
 
     return rst_mat
 
-
     print(rst_mat.shape)
     with open('rst_mat.npy', 'wb') as f:
         np.save(f, rst_mat)
@@ -259,7 +257,6 @@ def detect(model_filepath: str, examples_dirpath: str, per_class: int=2, batch_s
     ord = np.argsort(mean_rst)
     for k, o in enumerate(ord):
         print(k, o, mean_rst[o])
-
 
 
 if __name__ == '__main__':
