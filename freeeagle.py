@@ -132,7 +132,7 @@ def load_examples(examples_dirpath):
     return image_list
 
 
-def detect(model_filepath: str, examples_dirpath: str):
+def detect(model_filepath: str, examples_dirpath: str, per_class: int=2, batch_size: int=200, max_iters=1000):
     if torch.cuda.is_available():
         cudnn.benchmark = True
         device = torch.device('cuda')
@@ -144,40 +144,83 @@ def detect(model_filepath: str, examples_dirpath: str):
 
     model = torch.load(model_filepath)
     model_class = model.__class__.__name__
+    num_classes = model.head.classification_head.num_columns
     model.eval()
     model.to(device)
 
+    intl_c = batch_size//per_class
+    if intl_c * per_class < batch_size:
+        intl_c += 1
+        batch_size = intl_c * per_class
+
     new_model = SSDHijacker(model)
     new_model.set_record_features()
-    outputs = new_model(example_images[:1].to(device))
-
+    outputs = new_model(example_images.to(device))
     last_features = new_model.backbone.last_features
     new_model.set_record_features(False)
 
-    num_classes = None
-    target_class = 0
+    max_v = torch.max(last_features).item()
+    std_v = torch.std(last_features.flatten()).item()
+    mean_v = torch.mean(last_features.flatten()).item()
+    print(std_v, mean_v)
+    # idx = np.random.choice(len(last_features), per_class)
+    common_features = last_features[:per_class, :, :, :]
+
     rst_list = []
 
-    while num_classes is None or target_class < num_classes:
-        print('deal', target_class, '-'*20)
+    # while num_classes is None or target_class < num_classes:
+    for st_c in range(0, num_classes, intl_c):
         new_model.eval()
 
-        var = Variable(torch.rand_like(last_features), requires_grad=True)
-        var.data += last_features.data
+        intl_r = min(intl_c, num_classes-st_c)
+        batch_size = intl_r * per_class
+        print('deal classes [', st_c, ',', st_c+intl_r, ')', '-'*20)
+
+        # idx = np.random.choice(len(last_features), batch_size)
+        # init_features = last_features[idx, :]
+        init_features = common_features.repeat([intl_r,1,1,1])
+
+        init_values = torch.randn_like(init_features)*std_v+mean_v
+        var = Variable(init_values, requires_grad=True)
+        # var.data += init_features.data
         criterion = torch.nn.CrossEntropyLoss(reduction='none')
         optimizer = torch.optim.Adam([var], lr=1e-2, weight_decay=0.005)
 
-        label_tensor = None
-        for iters in tqdm(range(1000)):
+        label = torch.ones(batch_size, dtype=torch.long, device=device)
+        for st_i in range(0, batch_size, per_class):
+            tgt_class = st_i//per_class + st_c
+            label[st_i:st_i+per_class] *= tgt_class
+
+        best_loss = None
+        best_var = None
+        for iters in tqdm(range(max_iters)):
             optimizer.zero_grad()
             head_outputs = new_model.get_head_outputs(features_replace=var)
-            cls_logits = head_outputs['cls_logits'][0]
-            if num_classes is None:
-                num_classes = cls_logits.shape[-1]
-            if label_tensor is None:
-                label_tensor = torch.ones(cls_logits.shape[0], dtype=torch.long, device=device) * target_class
-            loss_all = criterion(cls_logits, label_tensor)
-            loss = torch.min(loss_all)
+            cls_logits = head_outputs['cls_logits']
+            # if num_classes is None:
+            #     num_classes = cls_logits.shape[-1]
+            cls_logits = torch.reshape(cls_logits, (-1, num_classes))
+            if label.shape[0] < cls_logits.shape[0]:
+                t = cls_logits.shape[0]//label.shape[0]
+                label = label.unsqueeze(1)
+                label = label.repeat((1,t))
+                label = label.flatten()
+                assert label.shape[0]==cls_logits.shape[0], "Dimensions mismatched"
+            loss_all = criterion(cls_logits, label)
+            loss_all = torch.reshape(loss_all, (batch_size, -1))
+            loss_min = torch.min(loss_all, dim=1)
+
+            loss = torch.mean(loss_min.values)
+
+            # early stop
+            z = loss.item()
+            if best_loss is None or z < best_loss:
+                best_loss = z
+                best_var = var.data.clone()
+                # print('update best_loss to', z)
+            if z < 1e-4:
+                break
+
             loss.backward()
             optimizer.step()
 
@@ -185,24 +228,28 @@ def detect(model_filepath: str, examples_dirpath: str):
                 var = var.clamp_(0, 999.)
             # print(iters, loss.item())
 
-            if loss.item() < 1e-6:
-                break
 
         with torch.no_grad():
-            head_outputs = new_model.get_head_outputs(features_replace=var)
-            cls_logits = head_outputs['cls_logits'][0]
+            head_outputs = new_model.get_head_outputs(features_replace=best_var)
+            cls_logits = head_outputs['cls_logits']
             cls_probs = torch.softmax(cls_logits, dim=-1)
-            ord = torch.argsort(cls_probs[:, target_class], descending=True)
-            best_prob = cls_probs[ord[0],:]
-        rst_list.append(best_prob.detach().cpu().numpy())
-        print(rst_list[-1])
+            a = []
+            for st_i in range(0, batch_size, per_class):
+                tgt_class = st_i//per_class + st_c
+                _probs = cls_probs[st_i:st_i+per_class,:,:]
+                rst = torch.max(_probs[:, :, tgt_class], axis=-1)
+                for k, i in enumerate(rst.indices):
+                    a.append(_probs[k, i, :].detach().cpu().numpy())
+            a = np.reshape(a, (intl_r, per_class, -1))
+            mean_probs = np.mean(a, axis=1)
+        rst_list.append(mean_probs)
 
-        # if target_class > 2:
-        #     break
+    rst_mat = np.concatenate(rst_list, axis=0)
 
-        target_class += 1
+    return rst_mat
 
-    rst_mat = np.stack(rst_list, axis=0)
+
+    print(rst_mat.shape)
     with open('rst_mat.npy', 'wb') as f:
         np.save(f, rst_mat)
 
@@ -213,9 +260,6 @@ def detect(model_filepath: str, examples_dirpath: str):
     for k, o in enumerate(ord):
         print(k, o, mean_rst[o])
 
-    exit(0
-
-    return None
 
 
 if __name__ == '__main__':
