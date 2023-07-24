@@ -50,7 +50,7 @@ import lightgbm as lgb
 from collections import OrderedDict
 from sklearn.preprocessing import StandardScaler
 
-from scipy.special import softmax
+from scipy.special import softmax, log_softmax
 from scipy import stats
 from tqdm import tqdm
 import time
@@ -435,6 +435,34 @@ class Detector(AbstractDetector):
         self.write_metaparameters()
         logging.info("Configuration done!")
 
+
+    def get_data_from_FE_results(self, rst_list):
+        X, y = [], []
+        for rst in rst_list:
+            model_info = rst['model_info']
+            rst_mat = rst['rst_mat']
+
+            lb = model_info['ground_truth']
+            y.append(lb)
+
+            fet = []
+            flatten_mat = rst_mat.flatten()
+            fet.append(np.mean(flatten_mat))
+            fet.append(np.std(flatten_mat))
+
+            no = np.linalg.norm(flatten_mat)
+            fet.append(no)
+
+            # normed_mat = flatten_mat / no
+            normed_mat = flatten_mat
+            a = ext_quantiles(normed_mat, bins=200)
+            fet.extend(a)
+            fet.append(np.max(normed_mat))
+            X.append(fet)
+
+        return np.asarray(X), np.asarray(y)
+
+
     def manual_configure(self, models_dirpath: str):
         """Configuration of the detector using the parameters from the metaparameters
         JSON file.
@@ -450,13 +478,104 @@ class Detector(AbstractDetector):
         model_path_list = sorted([os.path.join(models_dirpath, model) for model in os.listdir(models_dirpath)])
         logging.info(f"Loading %d models...", len(model_path_list))
 
-        model_repr_dict, model_ground_truth_dict, model_info_dict = load_models_dirpath(model_path_list,
-                                                                                        return_info=True)
+        # '''
+        model_repr_dict, model_ground_truth_dict, model_info_dict = load_models_dirpath(model_path_list, return_info=True)
+
+        # print(list(model_repr_dict.keys()))
+        model_name = 'FasterRCNN'
+        # model_name = 'DetrForObjectDetection'
+        model_repr_list = model_repr_dict[model_name]
+        model_ground_truth = model_ground_truth_dict[model_name]
+
+        model_info_list = model_info_dict[model_name]
+        for fo in model_info_list:
+            if fo['trigger_type'] is not None:
+                print(fo)
+        exit(0)
+
+        y_true, y_score = list(), list()
+        for model_repr, lb in zip(model_repr_list, model_ground_truth):
+            if model_name == 'FasterRCNN':
+                w = model_repr['roi_heads.box_predictor.cls_score.weight']
+                b = model_repr['roi_heads.box_predictor.cls_score.bias']
+            elif model_name == 'DetrForObjectDetection':
+                w = model_repr['class_labels_classifier.weight']
+                b = model_repr['class_labels_classifier.bias']
+            num_classes = len(b)
+            nw = np.sum(np.square(w), axis=1)
+            z = b + 0.5*nw
+            pi_z = softmax(z)
+            log_pi_z = log_softmax(z)
+            sorted_pi_z = np.sort(pi_z)
+            sorted_log_pi_z = np.sort(log_pi_z)
+            log_pi_z += np.log(num_classes)
+
+            y_true.append(lb)
+            y_score.append(np.std(pi_z))
+
+            print(lb, np.mean(pi_z), np.std(pi_z), np.max(pi_z)-np.min(pi_z), (sorted_pi_z[-1]-sorted_pi_z[-2])*num_classes)
+            # if lb == 0 and np.min(pi_z) < 1e-4:
+            #     print(num_classes)
+            #     print(log_pi_z)
+
+        auc = roc_auc_score(y_true, y_score)
+        print(auc)
+
+        exit(0)
+
+        from freeeagle import detect as freeeagle_detect
 
         for model_arch, models_info in model_info_dict.items():
             print(model_arch)
-            for model_info in models_info:
-                print(model_info['model_path'], model_info['ground_truth'])
+            if model_arch != 'SSD': continue
+
+            rst_list = []
+            for model_info in tqdm(models_info):
+                model_path, lb = model_info['model_path'], model_info['ground_truth']
+                print(model_path, lb)
+
+                head, tail = os.path.split(model_path)
+                examples_dirpath = os.path.join(head, 'clean-example-data')
+
+                rst_mat = freeeagle_detect(model_path, examples_dirpath)
+
+                rst_list.append({
+                    'model_info' : model_info,
+                    'rst_mat' : rst_mat,
+                })
+
+            with open('freeeagle_mat.pkl', 'wb') as f:
+                pickle.dump(rst_list, f)
+        # '''
+
+        with open('freeeagle_mat.pkl', 'rb') as f:
+            rst_list = pickle.load(f)
+
+        X, y = self.get_data_from_FE_results(rst_list)
+        print(X.shape, y.shape)
+
+        self.automl_kwargs['time_left_for_this_task'] = 60
+        print(self.automl_kwargs)
+
+        a = np.arange(len(X))
+        num_folds = 4
+        resampling_strategy = GroupKFold(n_splits=num_folds)
+        automl = autosklearn.classification.AutoSklearnClassifier(
+                # include={"feature_preprocessor":["MutualInfoPreprocessing"]},
+                metric=autosklearn.metrics.roc_auc,
+                resampling_strategy=resampling_strategy,
+                resampling_strategy_arguments={'folds': num_folds, 'groups': a},
+                **self.automl_kwargs,
+        )
+        print('automl has been set up')
+        automl.fit(X, y)
+
+        print(automl.leaderboard(ensemble_only=False))
+        # pprint(automl.show_models(), indent=4)
+        print(automl.sprint_statistics())
+
+
+
         exit(0)
 
         ncls_dict = dict()
@@ -614,7 +733,9 @@ class Detector(AbstractDetector):
             examples_dirpath: the directory path for the round example data
         """
 
-        # from utils.show import display_objdetect_image
+        from utils.show import display_objdetect_image
+
+        print('inference on ', examples_dirpath)
 
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         logging.info("Using compute device: {}".format(device))
@@ -627,13 +748,28 @@ class Detector(AbstractDetector):
         augmentation_transforms = torchvision.transforms.Compose(
             [torchvision.transforms.ConvertImageDtype(torch.float)])
 
-        iid = 0
+        # '''
+        cls_head = model.roi_heads.box_predictor.cls_score
+        in_list = [None]*1
+        out_list = [None]*1
+        cls_head.register_forward_hook(get_forward_hook_fn(0, in_list, out_list))
+        # '''
+
+
         logging.info("Evaluating the model on the clean example images.")
         # Inference on models
         for examples_dir_entry in os.scandir(examples_dirpath):
             if examples_dir_entry.is_file() and examples_dir_entry.name.endswith(".png"):
                 # load the example image
-                img = skimage.io.imread(examples_dir_entry.path)
+                path = examples_dir_entry.path
+
+                if not path.endswith('13.png'):
+                    continue
+
+
+                img = skimage.io.imread(path)
+                img_name = os.path.split(path)[-1]
+                print(path)
 
                 # convert the image to a tensor
                 # should be uint8 type, the conversion to float is handled later
@@ -651,6 +787,11 @@ class Detector(AbstractDetector):
 
                 # inference
                 outputs = model(image)
+
+
+                # show hook
+                print(in_list[0][235])
+                print(in_list[0].shape)
 
                 # handle multiple output formats for different model types
                 if 'DetrObjectDetectionOutput' in outputs.__class__.__name__:
@@ -705,8 +846,9 @@ class Detector(AbstractDetector):
                 # logging.info("Model: {}, Ground Truth: {}".format(examples_dir_entry.name, ground_truth))
 
                 image = examples_dir_entry.path
-                # display_objdetect_image(image, boxes, labels, scores, out_name=f'out_{iid}', score_top=len(ground_truth))
-                iid += 1
+                display_objdetect_image(image, boxes, labels, scores, out_name=f'out_{img_name}', score_top=len(ground_truth))
+                print(labels)
+                print(scores)
 
     def infer(
             self,
@@ -728,17 +870,13 @@ class Detector(AbstractDetector):
         os.environ['MPLCONFIGDIR'] = os.path.abspath(scratch_dirpath)
         print(os.getenv('MPLCONFIGDIR'))
 
-        # from freeeagle import detect as freeeagle_detect
-        # freeeagle_detect(model_filepath)
-        # exit(0)
-
         st_time = time.time()
 
         model, model_repr, model_class = load_model(model_filepath)
 
-        # self.inference_on_example_data(model, examples_dirpath)
-        from freeeagle import detect as freeeagle_detect
-        freeeagle_detect(model_filepath, examples_dirpath)
+        self.inference_on_example_data(model, examples_dirpath)
+        # from freeeagle import detect as freeeagle_detect
+        # freeeagle_detect(model_filepath, examples_dirpath)
 
         exit(0)
 

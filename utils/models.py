@@ -78,7 +78,6 @@ def load_model(model_filepath: str):
         {layer: tensor.numpy() for (layer, tensor) in model.state_dict().items()}
     )
 
-
     if model_class == 'SSD':
         s = model_repr['head.classification_head.module_list.5.bias'].shape
         pass
@@ -114,11 +113,25 @@ def load_model_info(model_dirpath: str, model_class: str, ground_truth: int):
         jdata = json.load(fh)
     n_classes = int(jdata['py/state']['number_classes'])
 
+    n_triggers = jdata['py/state']['num_triggers']
+    if n_triggers is None: n_triggers = 0
+
+    prefix = 'ObjectDetection'
+    suffix = 'TriggerExecutor'
+    if n_triggers > 0:
+        d = jdata['py/state']['triggers'][0]
+        z = d['py/object'].split('.')[-1]
+        trigger_type = z[len(prefix):-len(suffix)]
+    else:
+        trigger_type = None
+
+
     return {
         'n_classes': n_classes,
         'model_path': os.path.join(model_dirpath, 'model.pt'),
         'model_class': model_class,
         'ground_truth': ground_truth,
+        'trigger_type': trigger_type,
     }
 
 

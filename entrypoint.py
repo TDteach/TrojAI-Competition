@@ -131,7 +131,6 @@ if __name__ == "__main__":
 
     inf_parser.set_defaults(func=inference_mode)
 
-
     configure_parser = subparser.add_parser('configure', help='Execute container in configuration mode for TrojAI detection. This will produce a new set of learned parameters to be used in inference mode.')
 
     configure_parser.add_argument(

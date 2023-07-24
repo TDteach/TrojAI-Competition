@@ -132,7 +132,7 @@ def load_examples(examples_dirpath):
     return image_list
 
 
-def detect(model_filepath: str, examples_dirpath: str, per_class: int = 2, batch_size: int = 200, max_iters=500):
+def detect(model_filepath: str, examples_dirpath: str, per_class: int = 2, batch_size: int = 400, max_iters=1000):
     if torch.cuda.is_available():
         cudnn.benchmark = True
         device = torch.device('cuda')
@@ -163,8 +163,10 @@ def detect(model_filepath: str, examples_dirpath: str, per_class: int = 2, batch
     std_v = torch.std(last_features.flatten()).item()
     mean_v = torch.mean(last_features.flatten()).item()
     print(std_v, mean_v)
-    # idx = np.random.choice(len(last_features), per_class)
-    common_features = last_features[:per_class, :, :, :]
+
+    # common_features = last_features[:per_class, :, :, :]
+    idx = np.random.choice(len(last_features), per_class)
+    common_features = last_features[idx, :, :, :]
 
     rst_list = []
 
@@ -181,8 +183,9 @@ def detect(model_filepath: str, examples_dirpath: str, per_class: int = 2, batch
         init_features = common_features.repeat([intl_r, 1, 1, 1])
 
         init_values = torch.randn_like(init_features) * std_v + mean_v
+        # init_values = torch.rand_like(init_features) + init_features
+        # init_values = torch.rand_like(init_features)
         var = Variable(init_values, requires_grad=True)
-        # var.data += init_features.data
         criterion = torch.nn.CrossEntropyLoss(reduction='none')
         optimizer = torch.optim.Adam([var], lr=1e-2, weight_decay=0.005)
 
@@ -218,7 +221,7 @@ def detect(model_filepath: str, examples_dirpath: str, per_class: int = 2, batch
                 best_loss = z
                 best_var = var.data.clone()
                 # print('update best_loss to', z)
-            if z < 1e-4:
+            if z < 1e-6:
                 break
 
             loss.backward()
@@ -257,6 +260,9 @@ def detect(model_filepath: str, examples_dirpath: str, per_class: int = 2, batch
     ord = np.argsort(mean_rst)
     for k, o in enumerate(ord):
         print(k, o, mean_rst[o])
+
+    exit(0)
+    return rst_mat
 
 
 if __name__ == '__main__':

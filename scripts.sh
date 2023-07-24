@@ -16,7 +16,7 @@ echo $1
 if [ $1 -eq 0 ]
 then
 echo manual_configure
-python entrypoint.py configure \
+CUDA_VISIBLE_DEVICES=3 python entrypoint.py configure \
     --scratch_dirpath ./scratch/ \
     --metaparameters_filepath ./metaparameters.json \
     --schema_filepath ./metaparameters_schema.json \
@@ -46,6 +46,7 @@ fi
 
 
 # id-046 DetrForObjectDetection for misclassification
+# id-011 FasterRCNN for misclassification
 # id-049 FasterRCNN for evasion
 # id-051 SSD for localization: shifting the bbox to somewhere else than the correct location
 # id-061 FasterRCNN for injection: adding a new kind of detection objects
@@ -53,12 +54,12 @@ fi
 
 if [ $(( $1 & 2 )) -gt 0 ]
 then
-echo inference
-python entrypoint.py infer \
-    --model_filepath $MODELDIR/id-00000051/model.pt \
+echo inference id-$(printf "%08d" $2)
+CUDA_VISIBLE_DEVICES=3 python entrypoint.py infer \
+    --model_filepath $MODELDIR/id-$(printf "%08d" $2)/model.pt \
     --result_filepath ./scratch/output.txt \
     --scratch_dirpath ./scratch \
-    --examples_dirpath $MODELDIR/id-00000051/poisoned-example-data \
+    --examples_dirpath $MODELDIR/id-$(printf "%08d" $2)/poisoned-example-data \
     --round_training_dataset_dirpath $PHRASE \
     --learned_parameters_dirpath ./learned_parameters \
     --metaparameters_filepath ./metaparameters.json \
