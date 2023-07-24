@@ -6,64 +6,39 @@
 
 
 import re
-import os
 from collections import OrderedDict
+from os.path import join
+
 import torch
-import json
+import numpy
+from tqdm import tqdm
+
 
 def create_layer_map(model_repr_dict):
     model_layer_map = {}
     for (model_class, models) in model_repr_dict.items():
         layers = models[0]
         layer_names = list(layers.keys())
-        base_layer_names = list(
-            dict.fromkeys(
-                [
-                    re.sub(
-                        "\\.(weight|bias|running_(mean|var)|num_batches_tracked)",
-                        "",
-                        item,
-                    )
-                    for item in layer_names
-                ]
-            )
-        )
-        layer_map = OrderedDict(
-            {
-                base_layer_name: [
-                    layer_name
-                    for layer_name in layer_names
-                    if re.match(f"{base_layer_name}\.+", layer_name) is not None
-                ]
-                for base_layer_name in base_layer_names
-            }
-        )
+        base_layer_names = list()
+        for item in layer_names:
+            toks = re.sub("(weight|bias|running_(mean|var)|num_batches_tracked)", "", item)
+            # remove any duplicate '.' separators
+            toks = re.sub("\\.+", ".", toks)
+            base_layer_names.append(toks)
+        # use dict.fromkeys instead of set() to preserve order
+        base_layer_names = list(dict.fromkeys(base_layer_names))
+
+        layer_map = OrderedDict()
+        for base_ln in base_layer_names:
+            re_query = "{}.+".format(base_ln.replace('.', '\.'))  # escape any '.' wildcards in the regex query
+            layer_map[base_ln] = [ln for ln in layer_names if re.match(re_query, ln) is not None]
+
         model_layer_map[model_class] = layer_map
 
     return model_layer_map
 
 
-
-def wrap_network_prediction(boxes, labels):
-    """
-
-    Args:
-        boxes: numpy array [N x 4] of the box coordinates
-        labels: numpy array [N] of the labels
-
-    Returns:
-        list({'bbox': box, 'label': label})
-    """
-    pred = list()
-    for k in range(boxes.shape[0]):
-        ann = dict()
-        ann['bbox'] = boxes[k, :].tolist()
-        ann['label'] = labels[k]
-        pred.append(ann)
-    return pred
-
-
-def load_model(model_filepath: str):
+def load_model(model_filepath: str) -> (dict, str):
     """Load a model given a specific model_path.
 
     Args:
@@ -74,20 +49,13 @@ def load_model(model_filepath: str):
     """
     model = torch.load(model_filepath)
     model_class = model.__class__.__name__
+    print(model_class)
+    for (layer,tensor) in model.state_dict().items():
+        print(layer)
+        print(tensor.numpy())
     model_repr = OrderedDict(
         {layer: tensor.numpy() for (layer, tensor) in model.state_dict().items()}
     )
-
-    if model_class == 'SSD':
-        s = model_repr['head.classification_head.module_list.5.bias'].shape
-        pass
-    elif model_class == 'DetrForObjectDetection':
-        s = model_repr['class_labels_classifier.bias'].shape
-        pass
-    elif model_class == 'FasterRCNN':
-        s = model_repr['roi_heads.box_predictor.cls_score.bias'].shape
-        pass
-    # print(model_class, n_classes, s[0])
 
     return model, model_repr, model_class
 
@@ -99,69 +67,31 @@ def load_ground_truth(model_dirpath: str):
         model_dirpath: str -
 
     Returns:
-        Ground truth value (int)
+
     """
 
-    with open(os.path.join(model_dirpath, "ground_truth.csv"), "r") as fp:
+    with open(join(model_dirpath, "ground_truth.csv"), "r") as fp:
         model_ground_truth = fp.readlines()[0]
 
     return int(model_ground_truth)
 
 
-def load_model_info(model_dirpath: str, model_class: str, ground_truth: int):
-    with open(os.path.join(model_dirpath, 'config.json'), 'r') as fh:
-        jdata = json.load(fh)
-    n_classes = int(jdata['py/state']['number_classes'])
-
-    n_triggers = jdata['py/state']['num_triggers']
-    if n_triggers is None: n_triggers = 0
-
-    prefix = 'ObjectDetection'
-    suffix = 'TriggerExecutor'
-    if n_triggers > 0:
-        d = jdata['py/state']['triggers'][0]
-        z = d['py/object'].split('.')[-1]
-        trigger_type = z[len(prefix):-len(suffix)]
-    else:
-        trigger_type = None
-
-
-    return {
-        'n_classes': n_classes,
-        'model_path': os.path.join(model_dirpath, 'model.pt'),
-        'model_class': model_class,
-        'ground_truth': ground_truth,
-        'trigger_type': trigger_type,
-    }
-
-
-def load_models_dirpath(models_dirpath, return_info=False):
+def load_models_dirpath(models_dirpath):
     model_repr_dict = {}
     model_ground_truth_dict = {}
-    model_info_dict = {}
 
-    nn = []
-
-    for model_path in models_dirpath:
-
-        model, model_repr, model_class = load_model(os.path.join(model_path, "model.pt"))
+    for model_path in tqdm(models_dirpath):
+        model, model_repr, model_class = load_model(
+            join(model_path, "model.pt")
+        )
         model_ground_truth = load_ground_truth(model_path)
-        model_info = load_model_info(model_path, model_class, model_ground_truth)
-
-        nn.append(model_info['n_classes'])
 
         # Build the list of models
         if model_class not in model_repr_dict.keys():
             model_repr_dict[model_class] = []
             model_ground_truth_dict[model_class] = []
-            model_info_dict[model_class] = []
 
         model_repr_dict[model_class].append(model_repr)
         model_ground_truth_dict[model_class].append(model_ground_truth)
-        model_info_dict[model_class].append(model_info)
 
-    print(sorted(set(nn)))
-
-    if return_info:
-        return model_repr_dict, model_ground_truth_dict, model_info_dict
     return model_repr_dict, model_ground_truth_dict
