@@ -38,7 +38,7 @@ def create_layer_map(model_repr_dict):
     return model_layer_map
 
 
-def load_model(model_filepath: str) -> (dict, str):
+def load_model(model_filepath: str):
     """Load a model given a specific model_path.
 
     Args:
@@ -49,11 +49,8 @@ def load_model(model_filepath: str) -> (dict, str):
     """
     model = torch.load(model_filepath)
     model_class = model.__class__.__name__
-    print(model_class)
     for (layer,tensor) in model.state_dict().items():
-        print(layer)
-        print(tensor.numpy())
-    model_repr = OrderedDict(
+        model_repr = OrderedDict(
         {layer: tensor.numpy() for (layer, tensor) in model.state_dict().items()}
     )
 
@@ -85,6 +82,9 @@ def load_models_dirpath(models_dirpath):
             join(model_path, "model.pt")
         )
         model_ground_truth = load_ground_truth(model_path)
+        # if 'Simplified' in model_class:
+            # print(model)
+            # exit(0)
 
         # Build the list of models
         if model_class not in model_repr_dict.keys():
