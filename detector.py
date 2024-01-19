@@ -4,13 +4,14 @@
 
 # You are solely responsible for determining the appropriateness of using and distributing the software and you assume all risks associated with its use, including but not limited to the risks and costs of program errors, compliance with applicable laws, damage to or loss of data, programs or equipment, and the unavailability or interruption of operation. This software is not intended to be used in any situation where a failure could cause risk of injury or damage to property. The software developed by NIST employees is not subject to copyright protection within the United States.
 
-
+from collections import OrderedDict
 import logging
 import os
 import json
 import jsonpickle
 import pickle
 import numpy as np
+import copy
 
 from sklearn.ensemble import RandomForestRegressor
 
@@ -18,13 +19,17 @@ from utils.abstract import AbstractDetector
 from utils.models import load_model, load_models_dirpath
 
 import torch
+import torch.nn as nn
 try:
     import torch_ac
 except:
     pass
 
+from torch import optim
 import torch.nn.functional as F
 from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.experimental import enable_hist_gradient_boosting
+from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.model_selection import KFold
 from sklearn.metrics import roc_auc_score, log_loss, accuracy_score
 from sklearn.feature_selection import SelectKBest, mutual_info_classif
@@ -43,6 +48,17 @@ from autosklearn.pipeline.constants import SPARSE, DENSE, UNSIGNED_DATA, SIGNED_
 
 from typing import Optional
 
+from tqdm import tqdm
+
+from feature_selector import FE_layer, FE_global, select_features_from_As
+
+# import lightgbm as lgb
+from sklearn.metrics import classification_report
+from sklearn.model_selection import train_test_split
+
+
+
+
 def ext_quantiles(a, bins=100):
     qs = [i/bins for i in range(bins)]
     return np.quantile(a, qs)
@@ -52,6 +68,13 @@ def ext_weight_matrix(w):
     return 0
 
 
+def features_extraction_based_map(model_repr, fet_map):
+    fet = []
+    keys = list(model_repr.keys())
+    for nl,i in fet_map:
+        z = model_repr[keys[nl]].flatten()
+        fet.append(z[i])
+    return np.asarray(fet)
 
 
 def feature_extraction(model_class, model_repr):
@@ -62,7 +85,7 @@ def feature_extraction(model_class, model_repr):
         for i in range(6,-1,-1):
             ln = ln_list[i]
             w = model_repr[ln]
-            if len(w.shape) < 2: 
+            if len(w.shape) < 2:
                 continue
             # print(i, ln)
             if ip is None:
@@ -94,7 +117,7 @@ def feature_extraction(model_class, model_repr):
         for i in range(10,5,-1):
             ln = ln_list[i]
             w = model_repr[ln]
-            if len(w.shape) < 2: 
+            if len(w.shape) < 2:
                 continue
             # print(i, ln)
             if ip is None:
@@ -152,7 +175,7 @@ def feature_extraction(model_class, model_repr):
         for r in cp:
             r /= np.linalg.norm(r)
         ip = np.concatenate([ip,cp], axis=0)
-        
+
     # print(ip)
     return ip
 
@@ -197,7 +220,7 @@ def train_fn(dataset, configs):
         }
 
         return model, train_rst
-    
+
 def kfold_validation(k_fold, dataset, train_fn, test_fn, configs):
         kfold = KFold(n_splits=k_fold, shuffle=True)
 
@@ -258,6 +281,262 @@ def kfold_validation(k_fold, dataset, train_fn, test_fn, configs):
         return rst_dict
 
 
+
+
+
+
+
+
+class MLP(nn.Module):
+    def __init__(self, din=10, dout=1, num_filters=16, depth=1):
+        super(MLP, self).__init__()
+        self.din=din
+        self.dout=dout
+        self.num_filters=num_filters
+        self.depth = depth
+
+        if depth == -1:
+            self.features = nn.Linear(din, 1)
+        elif depth == 0 :
+            self.features = nn.Identity()
+            num_filters = din
+        else:
+          self.features = nn.Sequential()
+
+          for i in range(self.depth):
+            if i == 0:
+                self.features.add_module('linear%02d'%(i+1), nn.Linear(self.din, self.num_filters))
+            else:
+                self.features.add_module('linear%02d'%(i+1), nn.Linear(self.num_filters, self.num_filters))
+
+            if i < self.depth-1:
+                self.features.add_module('activation%02d'%(i+1), nn.LeakyReLU(inplace=True))
+            else:
+                pass
+                # self.features.add_module('activation%02d'%(i+1), nn.Tanh())
+
+        self.classifier = nn.Linear(num_filters, self.dout)
+
+
+    def forward(self, x, return_embeds=False):
+        _embeds = self.features(x)
+        # embeds = torch.tanh(embeds)
+        # if return_embeds:
+            # return embeds
+        if len(_embeds.shape) == 3:
+            embeds, _ = torch.max(_embeds, dim=-1)
+        else:
+            embeds = _embeds
+        _logits = self.classifier(embeds)
+        if len(_logits.shape) == 3:
+            logits, _ = torch.max(_logits, dim=1)
+        else:
+            logits = _logits
+        return logits
+    
+    def init_weights(self, m):
+        if type(m) == nn.Liner:
+            nn.init.xavier_uniform_(m.weight)
+            m.bias.data.fill_(0.00)
+
+    def reset(self):
+        self.features.apply(self.init_weights)
+        self.classifier.apply(self.init_weights)
+
+    def get_L1loss(self):
+        loss = 0
+        for layer in self.features:
+            if isinstance(layer, nn.Linear):
+                # loss += torch.mean(layer.weight.abs())
+                loss += torch.sum(layer.weight.abs())
+                break
+        return loss
+
+
+
+def train_classifier_on_layers(repr_dicts, labels, selected_layers, n_fold=5):
+    labels = np.asarray(labels)
+    labels = np.expand_dims(labels, axis=1)
+
+    data = []
+    for repr_dict in repr_dicts:
+        a = []
+        for layer in selected_layers:
+            weight = repr_dict[layer]
+            if len(weight.shape) == 1:
+                weight = np.expand_dims(weight, axis=0)
+            for i in range(len(weight)):
+                weight[i, :] /= np.linalg.norm(weight[i])
+            if weight.shape[1] != 768: continue
+            # print(weight.shape)
+            a.append(weight)
+        a = np.concatenate(a, axis=0)
+        print(a.shape)
+        data.append(a)
+    data= np.asarray(data)
+
+    return train_mlp(data, labels, n_fold, num_filters=6153, depth=-1)
+    # return train_mlp(data, labels, n_fold)
+
+
+def train_mlp(data, labels, n_fold=5, num_filters=8, depth=2, l1_weight=None):
+    
+    n = len(data)
+
+    index = np.random.permutation(n)
+    ntest = n//n_fold
+    ntrain = n-ntest
+
+    train_idx = index[:ntrain]
+    test_idx = index[ntrain:]
+
+    train_data = data[train_idx.astype(int)]
+    train_label = labels[train_idx.astype(int)]
+    test_data = data[test_idx.astype(int)]
+    test_label = labels[test_idx.astype(int)]
+
+    '''
+    from sklearn.svm import LinearSVC
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.feature_selection import SelectKBest, SelectFromModel
+    from sklearn.feature_selection import f_classif, chi2, mutual_info_classif
+    from sklearn.pipeline import Pipeline
+
+    from sklearn.feature_selection import RFECV
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.model_selection import StratifiedKFold
+
+    min_features_to_select = 32  # Minimum number of features to consider
+    clf = LogisticRegression()
+    cv = StratifiedKFold(5)
+
+    labels = np.squeeze(labels, -1)
+    rfecv = RFECV(
+    estimator=clf,
+    step=0.01,
+    cv=cv,
+    scoring="accuracy",
+    min_features_to_select=min_features_to_select,
+    n_jobs=20,
+    verbose=2,
+    )
+    rfecv.fit(data, labels)
+
+    print(f"Optimal number of features: {rfecv.n_features_}")
+    print(rfecv.score(data, labels))
+
+    exit(0)
+    # '''
+
+
+
+    d_data = data.shape[-1]
+    # mlp = MLP(din=d_data, dout=1, num_filters=6153, depth=-1)
+    mlp = MLP(din=d_data, dout=1, num_filters=num_filters, depth=depth)
+    mlp = mlp.cuda().train()
+
+    steps = 1000
+    batch_size = 32
+
+    optimizer = optim.NAdam(mlp.parameters(), lr=1e-5, betas=[0.8,0.95])
+    # optimizer = optim.Adam(mlp.parameters(), lr=1e-5, betas=[0.8, 0.95])
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, steps)
+
+    data_tensor = torch.from_numpy(train_data).cuda()
+    label_tensor = torch.from_numpy(train_label).cuda()
+
+    pbar = tqdm(range(steps))
+    for _ in pbar:
+        idx = torch.randperm(ntrain)[:batch_size]
+
+        x = data_tensor[idx]
+        y = label_tensor[idx]
+        # y = label_tensor[idx, :] * 2 - 1
+
+        logits_raw = mlp(x)
+        loss = F.binary_cross_entropy_with_logits(logits_raw, y.float())
+        # tmd = logits*y
+        # loss = -torch.mean(tmd)
+
+        # if l1_weight is not None:
+        if False:
+            l1_loss = mlp.get_L1loss()
+            print(l1_loss.item())
+            loss += l1_loss * l1_weight
+        print(loss.item())
+        # print(torch.sum(tmd > 0).item()/batch_size)
+
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        scheduler.step()
+
+    print(loss.item())
+
+    data_tensor = torch.from_numpy(test_data).cuda()
+    label_tensor = torch.from_numpy(test_label).cuda()
+    corrects = 0
+    mlp = mlp.eval()
+    with torch.no_grad():
+        logits = mlp(data_tensor)
+        preds = logits > 0
+        corrects += torch.eq(preds, label_tensor).sum().item()
+    print('test acc:', corrects/len(test_label))
+
+    return mlp
+
+
+def convert_repr_to_features(repr_dicts, layer_rst):
+    logits_ary = []
+    for key in layer_rst:
+        selected_layers = layer_rst[key]['selected_layers']
+        layer_mlp = layer_rst[key]['layer_mlp']
+
+        data = []
+        for repr_dict in repr_dicts:
+            a = []
+            for layer in selected_layers:
+                weight = repr_dict[layer]
+                if len(weight.shape) == 1:
+                    weight = np.expand_dims(weight, axis=0)
+                for i in range(len(weight)):
+                    weight[i, :] /= np.linalg.norm(weight[i])
+                if weight.shape[1] != 768: continue
+                a.append(weight)
+            a = np.concatenate(a, axis=0)
+            data.append(a)
+        data= np.asarray(data)
+        print(key, data.shape)
+
+        layer_mlp = layer_mlp.cuda()
+        data = torch.from_numpy(data).cuda()
+        with torch.no_grad():
+            embeds = layer_mlp(data, return_embeds=True).detach().cpu().numpy()
+
+        logits_ary.append(embeds)
+        layer_mlp = layer_mlp.cpu()
+
+    logits_ary = np.concatenate(logits_ary, axis=1)
+
+    return logits_ary
+
+
+def train_final_classifier(repr_dicts, labels, layer_rst, n_fold=5):
+    labels = np.asarray(labels)
+    labels = np.expand_dims(labels, axis=1)
+    data = convert_repr_to_features(repr_dicts, layer_rst)
+    print(data.shape)
+    return train_mlp(data, labels, n_fold, num_filters=32, depth=2)
+
+
+
+
+
+
+
+
+
 class MutualInfoPreprocessing(AutoSklearnPreprocessingAlgorithm):
     def __init__(self, input_features, random_state=None):
         # self.input_features = 100
@@ -302,6 +581,184 @@ class MutualInfoPreprocessing(AutoSklearnPreprocessingAlgorithm):
         return cf
 
 
+def select_top_cosine(xx, y, top=128):
+    xx = xx.transpose().astype(np.float64)
+    for i in range(xx.shape[0]):
+        xx[i] /= np.linalg.norm(xx[i])
+    z = np.matmul(xx, y)
+    o = np.argsort(-np.abs(z))[:top]
+    return z[o], o
+
+def split_train_test_repr_dicts(repr_dicts, labels, train_portion=0.8):
+    labels = np.asarray(labels)
+    n0 = np.sum(labels==0)
+    n1 = np.sum(labels==1)
+    n = len(repr_dicts)
+    assert n == n0+n1
+
+    shuffled = np.arange(n)
+    np.random.shuffle(shuffled)
+
+    tr_n0 = int(n0*train_portion)
+    tr_n1 = int(n1*train_portion)
+    print(f'split train n: {tr_n0+tr_n1} n0: {tr_n0}, n1: {tr_n1}')
+    print(f'split test n: {n-tr_n0-tr_n1} n0: {n0-tr_n0}, n1: {n1-tr_n1}')
+
+    tr_idx, te_idx = [], []
+    for i in shuffled:
+        if labels[i] == 0:
+            if tr_n0 > 0:
+                tr_idx.append(i)
+                tr_n0 -= 1
+            else:
+                te_idx.append(i)
+        else:
+            if tr_n1 > 0:
+                tr_idx.append(i)
+                tr_n1 -= 1
+            else:
+                te_idx.append(i)
+
+    train_repr_dicts, train_labels = [], []
+    for i in tr_idx:
+        train_repr_dicts.append(repr_dicts[i])
+        train_labels.append(labels[i])
+    train_labels = np.asarray(train_labels)
+
+    test_repr_dicts, test_labels = [], []
+    for i in te_idx:
+        test_repr_dicts.append(repr_dicts[i])
+        test_labels.append(labels[i])
+    test_labels = np.asarray(test_labels)
+
+    return train_repr_dicts, train_labels, test_repr_dicts, test_labels
+
+
+def test_model_for_repr_dicts(repr_dicts, labels, model, infer=False):
+    clf_model = model['classifier']
+    position = model['fet_selector']
+
+    X_list = []
+    for layer in position:
+        As = list()
+        for repr_dict in repr_dicts:
+            As.append(repr_dict[layer])
+        print(len(As))
+
+        print(layer, repr_dict[layer].shape)
+        fet_mat, _ = select_features_from_As(As,  position=position[layer])
+        X_list.append(fet_mat)
+    X_cat = np.concatenate(X_list, axis=1)
+
+    if isinstance(clf_model, dict):
+        selector, clf = clf_model['selector'], clf_model['clf']
+    else:
+        selector, clf = None, clf_model
+    if selector is not None:
+        X_cat = X_cat[:, selector]
+    if infer:
+        probs = clf.predict_proba(X_cat)[:, 1]
+        return probs
+
+    X_test, y_test = X_cat, labels
+
+    predictions = clf.predict(X_test)
+    print(classification_report(y_test, predictions))
+
+    probs = clf.predict_proba(X_test)[:, 1]
+    auc = roc_auc_score(y_test, probs)
+    ce_score = log_loss(y_test, probs)
+    print(f"AUC score: {auc:.6f}")
+    print(f"CE score: {ce_score:.6f}")
+
+    return auc, ce_score
+
+
+def train_model_for_repr_dicts(repr_dicts, labels, test_repr_dicts=None, test_labels=None):
+
+    def _train_final(X_train, y_train):
+        params = {
+            'n_estimators': 1000,
+            'subsample': 0.6,
+            'max_depth': 3,
+            'learning_rate': 0.05,
+            # 'verbose': 2,
+        }
+        clf = GradientBoostingClassifier(**params)
+        clf.fit(X_train, y_train)
+
+        selector=None
+        fimp = clf.feature_importances_
+        if len(fimp) > 512:
+            print('extract 512 features from', len(fimp))
+            od = np.argsort(fimp)[-512:]
+            selector = np.sort(od)
+            X_train = X_train[:, selector]
+            clf = GradientBoostingClassifier(**params)
+            clf.fit(X_train, y_train)
+
+        predictions = clf.predict(X_train)
+        print(classification_report(y_train, predictions))
+
+        return {
+            'clf': clf,
+            'selector': selector
+        }
+    
+    def _train_global(X_list, labels, p_dict):
+        X_cat = np.concatenate(X_list, axis=1)
+        gX, g_position = FE_global(X_cat, labels, p_dict)
+
+        # X_train, X_test, y_train, y_test = train_test_split(gX, labels, test_size=0.2, random_state=42)
+        clf = _train_final(gX, labels)
+        model = {
+            'fet_selector': g_position,
+            'classifier': clf,
+        }
+        return model
+
+    X_list, p_dict = [], OrderedDict()
+
+    layers = list(repr_dicts[0].keys())
+    print(layers)
+
+    best_auc = None
+    best_score = None
+    best_model = None
+    do_k = 0
+    for layer in tqdm(layers):
+        if 'embeddings' in layer:
+            continue
+        if do_k > 20:
+            break
+        print(layer)
+        As = list()
+        for repr_dict in repr_dicts:
+            As.append(repr_dict[layer])
+        print(len(As))
+
+        X, position = FE_layer(As, labels)
+        X_list.append(X)
+        p_dict[layer] = position
+        # break
+
+        if test_repr_dicts is not None and test_labels is not None:
+            model = _train_global(X_list, labels, p_dict)
+            auc, ce_score = test_model_for_repr_dicts(test_repr_dicts, test_labels, model)
+
+            if best_auc is None or auc > best_auc or (auc == best_auc and ce_score < best_score):
+                print(f'!!!!!! best_AUC update from {best_auc} to {auc}')
+                print(f'!!!!!! best_score update from {best_score} to {ce_score}')
+                best_auc = auc
+                best_score = ce_score
+                best_model = copy.deepcopy(model)
+        do_k += 1
+
+    if best_model is None:
+        best_model = _train_global(X_list, labels, p_dict)
+    return best_model
+
+
 
 class Detector(AbstractDetector):
     def __init__(self, metaparameter_filepath, learned_parameters_dirpath):
@@ -318,7 +775,7 @@ class Detector(AbstractDetector):
         self.ref_model_dict_filepath = os.path.join(self.learned_parameters_dirpath, "ref_model_dict.pkl")
 
         self.train_seed = metaparameters["train_seed"]
-        self.train_data_augment_factor = metaparameters["train_data_augment_factor"]
+        # self.train_data_augment_factor = metaparameters["train_data_augment_factor"]
         self.input_features = metaparameters["train_input_features"]
         self.automl_num_folds = metaparameters["train_automl_num_folds"]
         self.automl_kwargs = {
@@ -370,108 +827,120 @@ class Detector(AbstractDetector):
         model_path_list = sorted([os.path.join(models_dirpath, model) for model in os.listdir(models_dirpath)])
         logging.info(f"Loading %d models...", len(model_path_list))
 
+        if True:
+            model_repr_dict, model_ground_truth_dict = load_models_dirpath(model_path_list)
+            # print(list(model_repr_dict.keys())) #['RobertaForQuestionAnswering', 'MobileBertForQuestionAnswering']
+            data = {
+                'model_repr_dict': model_repr_dict,
+                'model_ground_truth_dict': model_ground_truth_dict,
+            }
+            with open('all_data.pkl', 'wb') as f:
+                pickle.dump(data, f)
+        else:
+            with open('all_data.pkl', 'rb') as f:
+                data = pickle.load(f)
+            model_repr_dict = data['model_repr_dict']
+            model_ground_truth_dict = data['model_ground_truth_dict']
+        exit(0)
 
-        model_repr_dict, model_ground_truth_dict = load_models_dirpath(model_path_list)
+        num_features = self.input_features
+
+        g_model = dict()
+
+        with open('model.pkl', 'rb') as f:
+            g_model = pickle.load(f)
 
         logging.info("Building RandomForest based on random features, with the provided mean and std.")
         # rso = np.random.RandomState(seed=self.weight_params['rso_seed'])
         for model_arch in model_repr_dict.keys():
-            X = []
-            y = []
-            for model_index in range(len(model_repr_dict[model_arch])):
-                y.append(model_ground_truth_dict[model_arch][model_index])
+            print(model_arch)
+            if '104' in model_arch:
+                continue
+            if '200' in model_arch:
+                continue
+            # if '1114' in model_arch:
+                # continue
+            labels = []
+            n = len(model_repr_dict[model_arch])
+            for model_index in range(n):
+                labels.append(model_ground_truth_dict[model_arch][model_index])
+            labels = np.asarray(labels)
 
-                z = model_repr_dict[model_arch][model_index]
-                feats = feature_extraction(model_arch, z)
+            repr_dicts = model_repr_dict[model_arch]
 
-                # model_feats = rso.normal(loc=self.weight_params['mean'], scale=self.weight_params['std'], size=(1,self.input_features))
-                model_feats = feats.flatten()
-                X.append(model_feats)
-            X = np.vstack(X)
-            self.train_model_for_Xy(X,y,prefix=model_arch)
+            train_repr_dicts, train_labels, test_repr_dicts, test_labels = split_train_test_repr_dicts(repr_dicts, labels, train_portion=0.8)
+            model = train_model_for_repr_dicts(train_repr_dicts, train_labels, test_repr_dicts=test_repr_dicts, test_labels=test_labels)
 
-        '''
-        dataset = [(xx,yy) for xx, yy in zip(X,y)]
-        kfold_rst = kfold_validation(k_fold=7, dataset=dataset, train_fn=train_fn, test_fn=test_fn, configs=None)
-        model = kfold_rst['model']
+            with open(f'{model_arch}.pkl', 'wb') as f:
+                pickle.dump(model, f)
 
-        logging.info("Saving model...")
-        model_filepath = os.path.join(self.learned_parameters_dirpath, f'model.pkl')
-        with open(model_filepath, 'wb') as fh:
-            pickle.dump(model, fh)
+            with open(f'{model_arch}.pkl', 'rb') as f:
+                model = pickle.load(f)
 
-        '''
+            test_model_for_repr_dicts(test_repr_dicts, test_labels, model)
+
+            g_model[model_arch] = model
+
+        with open('model.pkl', 'wb') as f:
+            pickle.dump(g_model, f)
+
         self.write_metaparameters()
         logging.info("Configuration done!")
 
 
 
-    def train_model_for_Xy(self, X, y, prefix=None):
-            from autosklearn.pipeline.components.feature_preprocessing import add_preprocessor
-            from autosklearn.classification import AutoSklearnClassifier
+    def train_model_for_Xy(self, X, y, prefix=None, f_selector=None):
+        from autosklearn.classification import AutoSklearnClassifier
+        from sklearn.ensemble import GradientBoostingClassifier
+        from sklearn.model_selection import cross_val_score
+        from sklearn.metrics import roc_auc_score 
 
-            add_preprocessor(MutualInfoPreprocessing)
+        '''
+        model = GradientBoostingClassifier(n_estimators=500, learning_rate=0.01, max_depth=2, random_state=0)
+        scores = cross_val_score(model, X, y, cv=self.automl_num_folds, scoring='roc_auc')
+        print(scores.shape)
+        print(scores)
 
-            # '''
-            f_selector = SelectKBest(mutual_info_classif, k=self.input_features)
-            f_selector.fit(X, y)
-            XX = f_selector.transform(X)
-            X = XX
-            print(X.shape)
-            # '''
+        print('AUC', np.average(scores))
 
-            '''
-            kn = len(X) // self.train_data_augment_factor
-            print(kn)
-            nn = kn*self.train_data_augment_factor
-            print(nn)
-            if nn < len(X):
-                X = X[:nn]
-                y = y[:nn]
-            print(X.shape)
-            print(len(y))
-            a = np.arange(kn)
-            a = np.tile(a, (self.train_data_augment_factor, 1))
-            a = a.T.flatten()
-            '''
-            # resampling_strategy = GroupKFold(n_splits=self.train_data_augment_factor)
-            automl = AutoSklearnClassifier(
-                # include={"feature_preprocessor":["MutualInfoPreprocessing"]},
-                metric=autosklearn.metrics.roc_auc,
-                # resampling_strategy=resampling_strategy,
-                resampling_strategy='cv',
-                # resampling_strategy_arguments={'folds': self.train_data_augment_factor, 'groups': a},
-                resampling_strategy_arguments={'folds': self.train_data_augment_factor},
-                **self.automl_kwargs,
-            )
-            print('automl has been set up')
-            automl.fit(X, y)
+        model = GradientBoostingClassifier(n_estimators=500, learning_rate=0.01, max_depth=2, random_state=0)
+        model.fit(X,y)
+        automl = model
+        '''
 
-            print(automl.leaderboard(ensemble_only=False))
-            # pprint(automl.show_models(), indent=4)
-            print(automl.sprint_statistics())
-            automl.refit(X, y)
+        # '''
+        automl = AutoSklearnClassifier(
+            # include={"feature_preprocessor":["MutualInfoPreprocessing"]},
+            metric=autosklearn.metrics.roc_auc,
+            # resampling_strategy=resampling_strategy,
+            resampling_strategy='cv',
+            # resampling_strategy_arguments={'folds': self.train_data_augment_factor, 'groups': a},
+            resampling_strategy_arguments={'folds': self.automl_num_folds},
+            **self.automl_kwargs,
+        )
+        print('automl has been set up')
+        automl.fit(X, y)
 
-            model = {
-                'f_selector': f_selector,
-                'automl': automl,
-            }
+        print(automl.leaderboard(ensemble_only=False))
+        # pprint(automl.show_models(), indent=4)
+        print(automl.sprint_statistics())
+        automl.refit(X, y)
+        # '''
 
-            logging.info("Saving model...")
-            if prefix is not None:
-                model_filepath = os.path.join(self.learned_parameters_dirpath, f'{prefix}_automl_model.pkl')
-            else:
-                model_filepath = os.path.join(self.learned_parameters_dirpath, 'automl_model.pkl')
-            with open(model_filepath, 'wb') as fh:
-                pickle.dump(model, fh)
+        model = {
+            'f_selector': f_selector,
+            'automl': automl,
+        }
 
-            with open(model_filepath, 'rb') as fh:
-                model = pickle.load(fh)
-            automl = model['automl']
+        logging.info("Saving model...")
+        if prefix is not None:
+            model_filepath = os.path.join(self.learned_parameters_dirpath, f'{prefix}_automl_model.pkl')
+        else:
+            model_filepath = os.path.join(self.learned_parameters_dirpath, 'automl_model.pkl')
+        with open(model_filepath, 'wb') as fh:
+            pickle.dump(model, fh)
 
-            y_pred = automl.predict(X)
-            print(f'Training AUC:', accuracy_score(y, y_pred))
-            return model
+        return model
 
 
 
@@ -547,6 +1016,7 @@ class Detector(AbstractDetector):
             scratch_dirpath,
             examples_dirpath,
             round_training_dataset_dirpath,
+            tokenizer_filepath,
     ):
         """Method to predict whether a model is poisoned (1) or clean (0).
 
@@ -570,8 +1040,6 @@ class Detector(AbstractDetector):
         # build a fake random feature vector for this model, in order to compute its probability of poisoning
         # rso = np.random.RandomState(seed=self.weight_params['rso_seed'])
         # X = rso.normal(loc=self.weight_params['mean'], scale=self.weight_params['std'], size=(1, self.input_features))
-        feats = feature_extraction(model_class, model_repr)
-        X = [feats.flatten()]
 
         '''
         # load the RandomForest from the learned-params location
@@ -588,20 +1056,15 @@ class Detector(AbstractDetector):
 
         if True:
             print(model_class)
-            model_filepath = os.path.join(self.learned_parameters_dirpath, f'{model_class}_automl_model.pkl')
+            model_filepath = os.path.join(self.learned_parameters_dirpath, 'model.pkl')
             with open(model_filepath, 'rb') as fh:
                 model = pickle.load(fh)
 
-            f_selector = model['f_selector']
-            automl = model['automl']
+            model = model[model_class]
+            probs = test_model_for_repr_dicts([model_repr], None, model, infer=True)
 
-            XX = f_selector.transform(X)
-            print(XX.shape)
-            X = XX
-
-            probability = automl.predict(X)[0]
+            probability = probs[0]
             print(probability)
-
 
 
         # write the trojan probability to the output file
@@ -609,3 +1072,21 @@ class Detector(AbstractDetector):
             fp.write(str(probability))
 
         logging.info("Trojan probability: {}".format(probability))
+
+
+
+
+if __name__ == '__main__':
+    mo_list = list()
+    fn = ['roberta_104.pkl','roberta_200.pkl','mobilebert.pkl']
+    for pt in fn:
+        with open(pt,'rb') as fh:
+            mo = pickle.load(fh)
+        mo_list.append(mo)
+    model = {
+        'RobertaForQuestionAnswering_104': mo_list[0],
+        'RobertaForQuestionAnswering_200': mo_list[1],
+        'MobileBertForQuestionAnswering_1114': mo_list[2],
+    }
+    with open('model.pkl','wb') as fh:
+        pickle.dump(model, fh)

@@ -4,14 +4,15 @@
 
 # You are solely responsible for determining the appropriateness of using and distributing the software and you assume all risks associated with its use, including but not limited to the risks and costs of program errors, compliance with applicable laws, damage to or loss of data, programs or equipment, and the unavailability or interruption of operation. This software is not intended to be used in any situation where a failure could cause risk of injury or damage to property. The software developed by NIST employees is not subject to copyright protection within the United States.
 
-
+import math
 import re
 from collections import OrderedDict
 from os.path import join
 
 import torch
-import numpy
 from tqdm import tqdm
+
+import torch
 
 
 def create_layer_map(model_repr_dict):
@@ -38,7 +39,7 @@ def create_layer_map(model_repr_dict):
     return model_layer_map
 
 
-def load_model(model_filepath: str):
+def load_model(model_filepath: str) -> (dict, str):
     """Load a model given a specific model_path.
 
     Args:
@@ -47,12 +48,17 @@ def load_model(model_filepath: str):
     Returns:
         model, dict, str - Torch model + dictionary representation of the model + model class name
     """
+
+    # print(model_filepath)
     model = torch.load(model_filepath)
     model_class = model.__class__.__name__
-    for (layer,tensor) in model.state_dict().items():
-        model_repr = OrderedDict(
+    # print(model_class)
+    model_repr = OrderedDict(
         {layer: tensor.numpy() for (layer, tensor) in model.state_dict().items()}
     )
+
+    nweights = len(list(model_repr.keys()))
+    model_class = model_class+f'_{nweights}'
 
     return model, model_repr, model_class
 
@@ -77,14 +83,12 @@ def load_models_dirpath(models_dirpath):
     model_repr_dict = {}
     model_ground_truth_dict = {}
 
+    z = 0
     for model_path in tqdm(models_dirpath):
         model, model_repr, model_class = load_model(
             join(model_path, "model.pt")
         )
         model_ground_truth = load_ground_truth(model_path)
-        # if 'Simplified' in model_class:
-            # print(model)
-            # exit(0)
 
         # Build the list of models
         if model_class not in model_repr_dict.keys():
@@ -93,5 +97,8 @@ def load_models_dirpath(models_dirpath):
 
         model_repr_dict[model_class].append(model_repr)
         model_ground_truth_dict[model_class].append(model_ground_truth)
+
+        z += 1
+        # if z >= 10: break
 
     return model_repr_dict, model_ground_truth_dict
