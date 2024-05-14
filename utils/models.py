@@ -24,6 +24,8 @@ def load_model(model_filepath: str, torch_dtype:torch.dtype=torch.float16):
         model, dict, str - Torch model + dictionary representation of the model + model class name
     """
 
+    print('model_filepath:', model_filepath)
+
     conf_filepath = os.path.join(model_filepath, 'reduced-config.json')
     logging.info("Loading config file from: {}".format(conf_filepath))
     with open(conf_filepath, 'r') as fh:
