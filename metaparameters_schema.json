@@ -1,17 +1,17 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Detector based on Kolmogorov-Smnirnov test",
-  "technique": "Weights' distributions based features + AutoML",
-  "technique_description": "Extracts the distributions across all weights beloning to the same layer, and apply AutoML to select the best classifier",
-  "technique_changes": "Include KS test",
-  "technique_type": ["Weight Analysis"],
+  "technique": "Enumeration Testing",
+  "technique_description": "Enumerate the first word in trigger",
+  "technique_changes": "First try",
+  "technique_type": ["Enumeration Testing"],
   "commit_id": "24c2cd684febd3ab0bf2230e2031f1cc15ce6194",
   "repo_name": "https://github.com/TDteach/TrojAI-Competition.git",
   "required": [],
   "additionalProperties": false,
   "type": "object",
   "properties": {
-    "train_seed": {
+    "random_seed": {
 		"description": "Random state seed during training.",
 		"type": "integer",
 		"minimum": 1,
@@ -19,53 +19,37 @@
 		"suggested_minimum": 1234,
 		"suggested_maximum": 12345
 	},
-    "train_data_augment_factor":  {
-		"description": "Augmentation factor: how many training instance will be generated for one given model. When it's set to 10, it costs about 24h to extract training data.",
+  "generate_length": {
+		"description": "Length to generate.",
 		"type": "integer",
 		"minimum": 5,
-		"maximum": 100,
+		"maximum": 10,
 		"suggested_minimum": 5,
-		"suggested_maximum": 20
-    },
-    "train_input_features":  {
-		"description": "The input features for training.",
-		"type": "integer",
-		"minimum": 5,
-		"maximum": 1024,
-		"suggested_minimum": 20,
-		"suggested_maximum": 200
-	},
-	"train_automl_time_left_for_this_task": {
-		"description": "Seconds for AutoML.",
-		"type": "integer",
-		"minimum": 60,
-		"maximum": 604800,
-		"suggested_minimum": 60,
-		"suggested_maximum": 108000
-	},
-	"train_automl_num_folds": {
-		"description": "Number of folds used in cross varification during AutoML.",
-		"type": "integer",
-		"minimum": 3,
-		"maximum": 20,
-		"suggested_minimum": 4,
 		"suggested_maximum": 10
 	},
-    "train_automl_n_jobs": {
-		"description": "Number of threads used by AutoML.",
+  "topk": {
+		"description": "TopK predicted tokens will be considered.",
 		"type": "integer",
 		"minimum": 1,
-		"maximum": 32,
-		"suggested_minimum": 4,
-		"suggested_maximum": 12
+		"maximum": 10,
+		"suggested_minimum": 1,
+		"suggested_maximum": 10
 	},
-    "train_automl_memory_limit": {
-		"description": "Memory limit of AutoML in Gigabyte.",
-		"type": "integer",
-		"minimum": 1,
-		"maximum": 256,
-		"suggested_minimum": 4,
-		"suggested_maximum": 128
+  "topk_threshold": {
+		"description": "At least this percentage of tested samples should contain the specific token within the topk predictions.",
+		"type": "number",
+		"minimum": 0.5,
+		"maximum": 1,
+		"suggested_minimum": 0.5,
+		"suggested_maximum": 1
+	},
+  "detect_threshold": {
+		"description": "The threshold used by final detection.",
+		"type": "number",
+		"minimum": 0.5,
+		"maximum": 1,
+		"suggested_minimum": 0.5,
+		"suggested_maximum": 1
 	}
   }
 }

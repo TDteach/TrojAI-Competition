@@ -1,23 +1,21 @@
 Bootstrap: docker
-From: python:3.8-bullseye
+From: pytorch/pytorch:2.2.2-cuda11.8-cudnn8-runtime
 
 %files
     ./detector.py /
     ./entrypoint.py /
     ./utils /
-    ./metaparameters.json /
     ./metaparameters_schema.json /
     ./learned_parameters /
-    ./feature_selector.py /
-    ./parallel_compute_mi.py /
+    ./frequent_words_5000.txt /
 
 %post
-    pip install auto-sklearn
+    apt update
+
     pip install --upgrade pip
-    pip install torchvision jsonpickle jsonschema transformers evaluate datasets
+    pip install jsonschema scikit-learn transformers accelerate peft
     pip install joblib
-    chmod 755 /*.py
-    chmod -R 755 /utils
+    pip install tqdm
 
 %runscript
     exec python3 /entrypoint.py "$@"

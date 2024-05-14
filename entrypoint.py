@@ -16,7 +16,6 @@ from detector import Detector
 
 warnings.filterwarnings("ignore")
 
-
 def inference_mode(args):
     # Validate config file against schema
     with open(args.metaparameters_filepath) as config_file:
@@ -31,11 +30,6 @@ def inference_mode(args):
     detector = Detector(args.metaparameters_filepath, args.learned_parameters_dirpath)
 
     logging.info("Calling the trojan detector")
-    print(args.model_filepath)
-    print(args.result_filepath)
-    print(args.scratch_dirpath)
-    print(args.examples_dirpath)
-    print(args.round_training_dataset_dirpath)
     detector.infer(args.model_filepath, args.result_filepath, args.scratch_dirpath, args.examples_dirpath, args.round_training_dataset_dirpath)
 
 
@@ -75,7 +69,7 @@ if __name__ == "__main__":
     inf_parser.add_argument(
         "--model_filepath",
         type=str,
-        help="File path to the pytorch model file to be evaluated.",
+        help="File path to the folder containing the HuggingFace safetensors version of the model to be evaluated.",
         required=True
     )
     inf_parser.add_argument(
@@ -99,14 +93,14 @@ if __name__ == "__main__":
         type=str,
         help="File path to the folder of examples which might be useful for determining "
         "whether a model is poisoned.",
-        required=True
+        default=None
     )
     inf_parser.add_argument(
         "--round_training_dataset_dirpath",
         type=str,
         help="File path to the directory containing id-xxxxxxxx models of the current "
         "rounds training dataset.",
-        required=True
+        default=None
     )
 
     inf_parser.add_argument(
@@ -131,8 +125,8 @@ if __name__ == "__main__":
         "instead be overwritten with the newly-configured parameters.",
         required=True,
     )
-
     inf_parser.set_defaults(func=inference_mode)
+
 
     configure_parser = subparser.add_parser('configure', help='Execute container in configuration mode for TrojAI detection. This will produce a new set of learned parameters to be used in inference mode.')
 
@@ -181,6 +175,7 @@ if __name__ == "__main__":
         help='Whether to enable automatic training or not, which will retrain the detector across multiple variables',
         action='store_true',
     )
+
 
     configure_parser.set_defaults(func=configure_mode)
 

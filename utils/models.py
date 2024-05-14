@@ -4,63 +4,61 @@
 
 # You are solely responsible for determining the appropriateness of using and distributing the software and you assume all risks associated with its use, including but not limited to the risks and costs of program errors, compliance with applicable laws, damage to or loss of data, programs or equipment, and the unavailability or interruption of operation. This software is not intended to be used in any situation where a failure could cause risk of injury or damage to property. The software developed by NIST employees is not subject to copyright protection within the United States.
 
-import math
-import re
-from collections import OrderedDict
+
 from os.path import join
 
 import torch
-from tqdm import tqdm
-
-import torch
-
-
-def create_layer_map(model_repr_dict):
-    model_layer_map = {}
-    for (model_class, models) in model_repr_dict.items():
-        layers = models[0]
-        layer_names = list(layers.keys())
-        base_layer_names = list()
-        for item in layer_names:
-            toks = re.sub("(weight|bias|running_(mean|var)|num_batches_tracked)", "", item)
-            # remove any duplicate '.' separators
-            toks = re.sub("\\.+", ".", toks)
-            base_layer_names.append(toks)
-        # use dict.fromkeys instead of set() to preserve order
-        base_layer_names = list(dict.fromkeys(base_layer_names))
-
-        layer_map = OrderedDict()
-        for base_ln in base_layer_names:
-            re_query = "{}.+".format(base_ln.replace('.', '\.'))  # escape any '.' wildcards in the regex query
-            layer_map[base_ln] = [ln for ln in layer_names if re.match(re_query, ln) is not None]
-
-        model_layer_map[model_class] = layer_map
-
-    return model_layer_map
+import json
+import os
+import logging
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 
-def load_model(model_filepath: str) -> (dict, str):
+def load_model(model_filepath: str, torch_dtype:torch.dtype=torch.float16):
     """Load a model given a specific model_path.
 
     Args:
-        model_filepath: str - Path to model.pt file
+        model_filepath: str - Path to where the model is stored
 
     Returns:
         model, dict, str - Torch model + dictionary representation of the model + model class name
     """
 
-    # print(model_filepath)
-    model = torch.load(model_filepath)
-    model_class = model.__class__.__name__
-    # print(model_class)
-    model_repr = OrderedDict(
-        {layer: tensor.numpy() for (layer, tensor) in model.state_dict().items()}
-    )
+    conf_filepath = os.path.join(model_filepath, 'reduced-config.json')
+    logging.info("Loading config file from: {}".format(conf_filepath))
+    with open(conf_filepath, 'r') as fh:
+        round_config = json.load(fh)
 
-    nweights = len(list(model_repr.keys()))
-    model_class = model_class+f'_{nweights}'
+    # '''
+    logging.info("Loading model from filepath: {}".format(model_filepath))
+    # https://huggingface.co/docs/transformers/installation#offline-mode
+    if round_config['use_lora']:
+        base_model_filepath = os.path.join(model_filepath, 'base-model')
+        logging.info("loading the base model (before LORA) from {}".format(base_model_filepath))
+        model = AutoModelForCausalLM.from_pretrained(base_model_filepath, trust_remote_code=True, torch_dtype=torch_dtype, local_files_only=True)
+        # model = AutoModelForCausalLM.from_pretrained(round_config['model_architecture'], trust_remote_code=True, attn_implementation="flash_attention_2", torch_dtype=torch_dtype)
 
-    return model, model_repr, model_class
+        fine_tuned_model_filepath = os.path.join(model_filepath, 'fine-tuned-model')
+        logging.info("loading the LORA adapter onto the base model from {}".format(fine_tuned_model_filepath))
+        model.load_adapter(fine_tuned_model_filepath)
+    else:
+        fine_tuned_model_filepath = os.path.join(model_filepath, 'fine-tuned-model')
+        logging.info("Loading full fine tune checkpoint into cpu from {}".format(fine_tuned_model_filepath))
+        model = AutoModelForCausalLM.from_pretrained(fine_tuned_model_filepath, trust_remote_code=True, torch_dtype=torch_dtype, local_files_only=True)
+        # model = AutoModelForCausalLM.from_pretrained(fine_tuned_model_filepath, trust_remote_code=True, attn_implementation="flash_attention_2", torch_dtype=torch_dtype)
+
+    model.eval()
+    # '''
+
+    tokenizer_filepath = os.path.join(model_filepath, 'tokenizer')
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_filepath, padding_side='left')
+    # tokenizer.add_special_tokens({'pad_token': '<|endoftext|>'})
+    # tokenizer.add_special_tokens({"pad_token":"<pad>"}) 
+    tokenizer.pad_token = tokenizer.bos_token
+    model.config.pad_token_id = model.config.bos_token_id
+    # model = None
+
+    return model, tokenizer
 
 
 def load_ground_truth(model_dirpath: str):
@@ -78,27 +76,3 @@ def load_ground_truth(model_dirpath: str):
 
     return int(model_ground_truth)
 
-
-def load_models_dirpath(models_dirpath):
-    model_repr_dict = {}
-    model_ground_truth_dict = {}
-
-    z = 0
-    for model_path in tqdm(models_dirpath):
-        model, model_repr, model_class = load_model(
-            join(model_path, "model.pt")
-        )
-        model_ground_truth = load_ground_truth(model_path)
-
-        # Build the list of models
-        if model_class not in model_repr_dict.keys():
-            model_repr_dict[model_class] = []
-            model_ground_truth_dict[model_class] = []
-
-        model_repr_dict[model_class].append(model_repr)
-        model_ground_truth_dict[model_class].append(model_ground_truth)
-
-        z += 1
-        # if z >= 10: break
-
-    return model_repr_dict, model_ground_truth_dict

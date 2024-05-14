@@ -1,8 +1,8 @@
 #!/bin/bash
 
 ROOT=$HOME/share/trojai
-ROUND=$ROOT/round16
-PHRASE=$ROUND/rl-randomized-lavaworld-aug2023-train
+ROUND=$ROOT/round18
+PHRASE=$ROUND/llm-pretrain-apr2024-train-rev2
 MODELDIR=$PHRASE/models
 
 
@@ -21,8 +21,7 @@ CUDA_VISIBLE_DEVICES=2 python entrypoint.py configure \
     --metaparameters_filepath ./metaparameters.json \
     --schema_filepath ./metaparameters_schema.json \
     --learned_parameters_dirpath ./learned_parameters/ \
-    --configure_models_dirpath $MODELDIR \
-    --tokenizers_dirpath tokenizers
+    --configure_models_dirpath $MODELDIR
 fi
 
 
@@ -36,8 +35,7 @@ python entrypoint.py configure \
     --metaparameters_filepath ./metaparameters.json \
     --schema_filepath ./metaparameters_schema.json \
     --learned_parameters_dirpath ./learned_parameters/ \
-    --configure_models_dirpath $MODELDIR \
-    --tokenizers_dirpath haha
+    --configure_models_dirpath $MODELDIR
 fi
 
 
@@ -47,26 +45,19 @@ fi
 #mv new_learned_parameters learned_parameters
 
 
-# id-046 DetrForObjectDetection for misclassification
-# id-011 FasterRCNN for misclassification
-# id-049 FasterRCNN for evasion
-# id-051 SSD for localization: shifting the bbox to somewhere else than the correct location
-# id-061 FasterRCNN for injection: adding a new kind of detection objects
-
 
 if [ $(( $1 & 2 )) -gt 0 ]
 then
 echo inference id-$(printf "%08d" $2)
 CUDA_VISIBLE_DEVICES=3 python entrypoint.py infer \
-    --model_filepath $MODELDIR/id-$(printf "%08d" $2)/model.pt \
-    --result_filepath ./scratch/output.txt \
+    --model_filepath $MODELDIR/id-$(printf "%08d" $2) \
+    --result_filepath ./output.txt \
     --scratch_dirpath ./scratch \
-    --examples_dirpath $MODELDIR/id-$(printf "%08d" $2)/poisoned-example-data \
+    --examples_dirpath $MODELDIR/id-$(printf "%08d" $2)/clean-example-data \
     --round_training_dataset_dirpath $PHRASE \
-    --learned_parameters_dirpath ./learned_parameters \
-    --metaparameters_filepath ./metaparameters.json \
+    --metaparameters_filepath ./learned_parameters/metaparameters.json \
     --schema_filepath ./metaparameters_schema.json \
-    --tokenizer_filepath tokenizers
+    --learned_parameters_dirpath ./learned_parameters
 fi
 
 
